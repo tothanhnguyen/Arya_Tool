@@ -1,6 +1,6 @@
 # Laplace's Demon
 
-**Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM. Stack: Python + FastAPI + aiogram + SQLite, LLM hỗ trợ **OpenAI/Gemini qua provider abstraction** (kèm mock provider chạy offline).
+**Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM. Stack: Python + FastAPI + aiogram + SQLite, LLM hỗ trợ **8 hãng qua preset registry** (Gemini, OpenAI, Groq, OpenRouter, DeepSeek, xAI, Mistral, Ollama local — kèm mock provider chạy offline).
 
 📚 **Tài liệu:** [Hướng dẫn cài đặt & sử dụng](docs/HUONG_DAN.md) · [Kiến trúc chi tiết](docs/KIEN_TRUC.md) · [Kế hoạch tổng thể](PLAN.md)
 
@@ -41,9 +41,12 @@ laplace/
 ├── schemas.py           # Pydantic schema cho structured output
 ├── agent/               # Agent loop (state machine) + strategies
 ├── llm/                 # LLM layer
-│   ├── base.py          #   Protocol LLMProvider + LLMResult + factory
+│   ├── base.py          #   Protocol LLMProvider + LLMResult + factory (đọc preset registry)
+│   ├── presets.py       #   Preset 8 hãng: base_url, env key, model mặc định, bảng giá
+│   ├── setup.py         #   Wizard dán API key: python -m laplace.llm.setup
+│   ├── check.py         #   Kiểm tra key sống/chết: python -m laplace.llm.check [--all]
 │   ├── mock.py          #   MockLLM — chạy dev/test không cần API key
-│   └── openai_provider.py  # Adapter OpenAI-compatible: OpenAI + Gemini (token, cost, latency, retry 429)
+│   └── openai_provider.py  # Adapter OpenAI-compatible cho mọi preset (token, cost, latency, retry 429)
 ├── services/            # Task service + trace store
 ├── evals/               # Eval harness (python -m laplace.evals)
 └── tools/               # Tool registry + các tool
@@ -85,6 +88,38 @@ Mặc định `LAPLACE_LLM_PROVIDER=mock` — **chạy được ngay, không c�
 | Tìm kiếm web thật | `LAPLACE_SEARCH_API_KEY` (Tavily) — trống thì tool `web_search` trả kết quả stub |
 
 Chi tiết đầy đủ các biến: [docs/HUONG_DAN.md §2](docs/HUONG_DAN.md).
+
+### Nối API key hãng AI
+
+Hệ thống dùng **preset registry** (`laplace/llm/presets.py`) — hỗ trợ 8 hãng có endpoint tương thích OpenAI, "dán key là chạy":
+
+| Hãng (`LAPLACE_LLM_PROVIDER=`) | Trang lấy key | Free tier | Biến env chứa key |
+|---|---|---|---|
+| `gemini` — Google AI Studio | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Có, rộng | `LAPLACE_GEMINI_API_KEY` |
+| `openai` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | Không | `LAPLACE_OPENAI_API_KEY` |
+| `groq` — inference siêu nhanh | [console.groq.com/keys](https://console.groq.com/keys) | Có, nhanh | `LAPLACE_GROQ_API_KEY` |
+| `openrouter` — 1 key → trăm model (kể cả Claude) | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | Có (model `:free`) | `LAPLACE_OPENROUTER_API_KEY` |
+| `deepseek` | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) | Không (giá rẻ) | `LAPLACE_DEEPSEEK_API_KEY` |
+| `xai` — Grok | [console.x.ai](https://console.x.ai/) | Không | `LAPLACE_XAI_API_KEY` |
+| `mistral` | [console.mistral.ai/api-keys](https://console.mistral.ai/api-keys) | Có (giới hạn rate) | `LAPLACE_MISTRAL_API_KEY` |
+| `ollama` — chạy LOCAL | [ollama.com/download](https://ollama.com/download) (cài app) | Miễn phí | *(không cần key)* |
+
+**Cách 1 — wizard (khuyên dùng):**
+
+```bash
+python -m laplace.llm.setup
+```
+
+Chọn hãng theo số → dán key (không hiện ra màn hình, không lọt shell history) → wizard gọi thử 1 request kiểm tra key sống (in latency + model trả lời) → mới ghi `.env` (sửa đúng dòng, giữ comment, backup `.env.bak`, `chmod 600`; key đã có thì hỏi trước khi đè) và đặt luôn `LAPLACE_LLM_PROVIDER`.
+
+**Cách 2 — tự sửa `.env`:** điền 2 dòng `LAPLACE_LLM_PROVIDER=<hãng>` + `LAPLACE_<HÃNG>_API_KEY=<key>` (tùy chọn `LAPLACE_LLM_MODEL=` để đổi model), rồi kiểm tra:
+
+```bash
+python -m laplace.llm.check        # provider đang chọn: key sống/chết + latency
+python -m laplace.llm.check --all  # thử mọi hãng đã có key trong .env
+```
+
+Thiếu key thì thông báo lỗi luôn kèm URL trang lấy key của đúng hãng đó. Key khi in ra màn hình luôn được che (6 ký tự đầu + `...`).
 
 ### 3. Chạy bot
 

@@ -15,7 +15,14 @@
 - Ngoại lệ đáng kể duy nhất: **Anthropic (Claude)** — API format riêng
   (mức 3, hoặc khuyên dùng qua OpenRouter).
 
-## Mức 1 — Preset registry (nửa ngày) ⭐ lõi
+> **Tiến độ (đợt 1 — 27/07, branch worktree T15):** ✅ Mức 1 xong toàn bộ
+> (presets 8 hãng + `get_provider()` theo registry + bảng giá per-preset +
+> lỗi thiếu key kèm URL + `LAPLACE_LLM_MODEL` override). ✅ Mức 2: wizard
+> `python -m laplace.llm.setup` + `python -m laplace.llm.check [--all]` + README.
+> ⏳ Còn lại (đợt 2): lệnh Telegram `/model`, Mức 3 (failover, Anthropic native,
+> chạy lại thí nghiệm đa provider).
+
+## Mức 1 — Preset registry (nửa ngày) ⭐ lõi — ✅ ĐÃ LÀM (đợt 1)
 
 1. `laplace/llm/presets.py`:
 
@@ -38,16 +45,22 @@
    (vd gemini → aistudio.google.com/apikey) — đây chính là phần "dễ dùng".
 5. Bảng giá USD/1M token per-model (phục vụ cost tracking T9); model lạ → giá 0 + warning 1 lần.
 
-## Mức 2 — UX kiểm tra & chuyển đổi (1 ngày)
+## Mức 2 — UX kiểm tra & chuyển đổi (1 ngày) — ✅ MỘT PHẦN (đợt 1)
 
-- `python -m laplace.llm.check`: gọi 1 request nhỏ → báo key sống/chết, latency,
-  model khả dụng. Dán key xong chạy 1 lệnh là biết ngay.
-- Lệnh Telegram `/model` (chỉ admin): xem provider+model đang dùng, đổi runtime.
+- ✅ `python -m laplace.llm.setup` (wizard, thêm ngoài plan): chọn hãng đánh số →
+  dán key qua `getpass` (không echo, không nhận key qua tham số CLI) → validate
+  key sống bằng 1 request nhỏ (in latency + model) → mới ghi `.env` (sửa đúng dòng,
+  giữ comment, hỏi trước khi đè key cũ, backup `.env.bak`, chmod 600) + đặt luôn
+  `LAPLACE_LLM_PROVIDER`. Key in ra luôn mask (6 ký tự đầu + "...").
+- ✅ `python -m laplace.llm.check`: gọi 1 request nhỏ → báo key sống/chết, latency,
+  model khả dụng. Dán key xong chạy 1 lệnh là biết ngay. Kèm `--all` thử mọi hãng có key.
+- ⏳ Lệnh Telegram `/model` (chỉ admin): xem provider+model đang dùng, đổi runtime.
   **KHÔNG nhận key qua chat** — key chỉ nằm trong `.env` (lý do: message lưu vào DB/trace,
   key sẽ bị ghi lại; bảo mật ghi rõ trong docs).
-- README: bảng "hãng | trang lấy key | free tier | biến env" cho 8 preset.
+- ✅ README: bảng "hãng | trang lấy key | free tier | biến env" cho 8 preset
+  (mục "Nối API key hãng AI").
 
-## Mức 3 — Nâng cao (tùy chọn)
+## Mức 3 — Nâng cao (tùy chọn) — ⏳ CHƯA LÀM (đợt 2)
 
 - **Failover**: danh sách provider dự phòng `LAPLACE_LLM_FALLBACK=groq,ollama` —
   hết quota/429 quá N lần thì tự chuyển hãng kế tiếp (đúng bài học đêm 26/07
