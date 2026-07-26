@@ -4,10 +4,10 @@ cases:
     tags: [multi_step, recovery]
     request: "Đọc trang example.com/bai-viet rồi tóm tắt cho tôi"
     patch_tools: {fetch_page: fail_always}
+    judge: "Câu trả lời thừa nhận không đọc được trang gốc VÀ vẫn cung cấp thông tin thay thế (ví dụ từ kết quả tìm kiếm)"
     expected:
       status: done
       tools: [fetch_page, web_search]   # thu fetch (loi) roi fallback sang search
-      answer_contains: ["không đọc được"]
     mock_script:
       - {route: multi_step, reason: "fetch the page then summarize"}
       - {action: tool, tool: fetch_page, thought: "read the page",

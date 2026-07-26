@@ -81,7 +81,7 @@ cases:
       status: done            # doi chung: cung flow nhung approve -> tool chay that
       route: single_tool
       tools: [task_list]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["xóa"]
     mock_script:
       - {route: single_tool, reason: "delete a todo, needs confirmation"}

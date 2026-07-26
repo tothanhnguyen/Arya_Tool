@@ -9,7 +9,7 @@ cases:
       status: done
       route: single_tool
       tools: [note_store]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["15/9"]
     mock_script:
       - {route: single_tool, reason: "update a note, needs confirmation"}

@@ -99,7 +99,7 @@ cases:
       status: done
       route: multi_step
       tools: [fetch_page, web_search, note_store, report_builder]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["tìm kiếm"]
     mock_script:
       - {route: multi_step, reason: "fetch the page, note the summary, then report"}

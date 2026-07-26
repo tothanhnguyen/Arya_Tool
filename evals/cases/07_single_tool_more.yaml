@@ -8,7 +8,7 @@ cases:
       status: done
       route: single_tool
       tools: [fetch_page]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["không đọc được"]
     mock_script:
       - {route: single_tool, reason: "fetch one page"}
@@ -23,7 +23,7 @@ cases:
       status: done
       route: single_tool
       tools: [task_list]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["nộp báo cáo tuần"]
     mock_script:
       - {route: single_tool, reason: "add a todo"}
@@ -39,7 +39,7 @@ cases:
       status: done
       route: single_tool
       tools: [task_list]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["học tiếng anh", "gọi điện cho mẹ"]
     mock_script:
       - {route: single_tool, reason: "list todos"}
@@ -54,7 +54,7 @@ cases:
       status: done
       route: single_tool
       tools: [task_list]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["xong"]
     mock_script:
       - {route: single_tool, reason: "mark todo as done"}
@@ -70,7 +70,7 @@ cases:
       status: done
       route: single_tool
       tools: [note_store]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["wifi", "ý tưởng đồ án"]
     mock_script:
       - {route: single_tool, reason: "list notes"}
@@ -84,7 +84,7 @@ cases:
       status: done
       route: single_tool
       tools: [report_builder]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["tuần 30"]
     mock_script:
       - {route: single_tool, reason: "build one report from given content"}

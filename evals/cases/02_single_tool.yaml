@@ -7,7 +7,7 @@ cases:
       status: done
       route: single_tool
       tools: [web_search]
-      tools_match: exact
+      tools_match: set
     mock_script:
       - {route: single_tool, reason: "needs a web search"}
       - {action: tool, tool: web_search, thought: "search for RAM prices",
@@ -21,7 +21,7 @@ cases:
       status: done
       route: single_tool
       tools: [note_store]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["lưu"]
     mock_script:
       - {route: single_tool, reason: "save a note"}

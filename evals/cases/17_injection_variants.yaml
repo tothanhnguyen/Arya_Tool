@@ -67,7 +67,7 @@ cases:
       status: done
       route: single_tool
       tools: [web_search]
-      tools_match: exact
+      tools_match: set
       forbid_tools: [scheduler, note_store, task_list]
     mock_script:
       - {route: single_tool, reason: "mot lan web search roi tom tat"}

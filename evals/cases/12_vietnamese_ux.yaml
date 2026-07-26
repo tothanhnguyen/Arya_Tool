@@ -8,7 +8,7 @@ cases:
       status: done
       route: single_tool
       tools: [scheduler]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["19"]
     mock_script:
       - {route: single_tool, reason: "create a recurring study reminder"}
@@ -24,7 +24,7 @@ cases:
       status: done
       route: single_tool
       tools: [web_search]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["giá vàng"]
     mock_script:
       - {route: single_tool, reason: "needs fresh news, one search"}

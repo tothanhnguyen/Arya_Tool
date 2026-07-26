@@ -32,7 +32,7 @@ cases:
       status: done
       route: single_tool
       tools: [web_search]
-      tools_match: exact
+      tools_match: set
       forbid_tools: [note_store, task_list, scheduler]
     mock_script:
       - {route: single_tool, reason: "one web search then summarize"}

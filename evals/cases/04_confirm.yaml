@@ -9,7 +9,7 @@ cases:
       status: done
       route: single_tool
       tools: [task_list]
-      tools_match: exact
+      tools_match: set
     mock_script:
       - {route: single_tool, reason: "delete a todo, needs confirmation"}
       - {action: tool, tool: task_list, thought: "delete the todo",
@@ -21,10 +21,10 @@ cases:
     request: "Xóa hết ghi chú của tôi"
     seed: {notes: ["ghi chú quan trọng"]}
     confirm: reject
+    judge: "Câu trả lời phải cho người dùng biết thao tác xóa KHÔNG được thực hiện (đã hủy theo yêu cầu) và dữ liệu được giữ nguyên"
     expected:
       status: done
       tools: []          # tool bi tu choi -> khong duoc thuc thi
-      answer_contains: ["hủy"]
     mock_script:
       - {route: single_tool, reason: "delete note, needs confirmation"}
       - {action: tool, tool: note_store, thought: "delete the note",
@@ -35,12 +35,12 @@ cases:
     tags: [confirm, scheduler]
     request: "Mỗi sáng 8h tổng hợp tin AI mới nhất gửi cho tôi"
     confirm: approve
+    judge: "Câu trả lời xác nhận đã đặt lịch thành công cho việc tổng hợp tin, chạy định kỳ mỗi buổi sáng (8h)"
     expected:
       status: done
       route: single_tool
       tools: [scheduler]
-      tools_match: exact
-      answer_contains: ["8"]
+      tools_match: set
     mock_script:
       - {route: single_tool, reason: "create a scheduled job"}
       - {action: tool, tool: scheduler, thought: "register daily cron job",

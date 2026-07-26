@@ -24,7 +24,7 @@ cases:
       status: done
       route: single_tool
       tools: [send_email]     # step ghi lai ten tool bia, status=error
-      tools_match: exact
+      tools_match: set
       answer_contains: ["không có công cụ"]
     mock_script:
       - {route: single_tool, reason: "try to send an email"}

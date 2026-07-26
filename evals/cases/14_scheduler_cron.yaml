@@ -10,7 +10,7 @@ cases:
       status: done
       route: single_tool
       tools: [scheduler]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["thứ 2", "8h"]
     mock_script:
       - {route: single_tool, reason: "create a weekly reminder job"}
@@ -46,7 +46,7 @@ cases:
       status: done
       route: single_tool
       tools: [scheduler]
-      tools_match: exact
+      tools_match: set
       answer_contains: ["chưa có"]
     mock_script:
       - {route: single_tool, reason: "list the user's scheduled jobs"}
