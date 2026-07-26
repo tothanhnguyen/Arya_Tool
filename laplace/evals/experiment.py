@@ -146,8 +146,11 @@ def _run_case_resilient(
         with chdir(work):
             row = run_case(case, provider=cfg.provider, workdir=Path("."),
                            run_idx=run_idx, judge_llm=judge_llm)
-        db_file = work / f"db_{case.id}_{run_idx}.db"
-        db_file.unlink(missing_ok=True)
+        # Xoa ca db lan -wal/-shm: file WAL mo coi (unlink moi .db truoc day, hoac
+        # process bi kill giua chung) lam SQLite bao "disk I/O error" khi mo lai
+        # db cung ten o lan resume sau
+        for db_file in work.glob(f"db_{case.id}_{run_idx}.db*"):
+            db_file.unlink(missing_ok=True)
         error = row.get("error")
         if not error or not RETRYABLE_ERROR.search(error):
             break
@@ -383,6 +386,9 @@ def run_experiment(
     exp_dir.mkdir(parents=True, exist_ok=True)
     work = exp_dir / "work"
     work.mkdir(exist_ok=True)
+    # Don sach db/-wal/-shm sot lai tu lan chay truoc (kill giua chung) truoc khi resume
+    for stale in work.glob("*.db*"):
+        stale.unlink(missing_ok=True)
     ckpt = exp_dir / "checkpoint.jsonl"
     judge_llm = None
     if judge_provider:
@@ -447,7 +453,7 @@ def run_experiment(
     _write_report(exp_dir, meta, summaries, rows)
     if charts:
         make_charts(exp_dir, summaries, strategies, providers)
-    for leftover in work.glob("*.db"):
+    for leftover in work.glob("*.db*"):
         leftover.unlink(missing_ok=True)
     print(f"\nKết quả: {exp_dir}/report.md")
     return {"meta": meta, "summaries": summaries, "out_dir": str(exp_dir)}

@@ -114,8 +114,8 @@ def test_experiment_matrix_writes_outputs_and_resumes(tmp_path):
     assert set(res["summaries"]) == {"react__mock", "plan_execute__mock"}
     # chien luoc goc (react) giu duoc mock_script -> pass tron
     assert res["summaries"]["react__mock"]["success_rate"] == 1.0
-    # khong con file db tam trong thu muc ket qua
-    assert not list(exp_dir.rglob("*.db"))
+    # khong con file db tam (ke ca -wal/-shm mo coi) trong thu muc ket qua
+    assert not list(exp_dir.rglob("*.db*"))
 
     # resume: chay lai cung name -> khong run nao chay them
     res2 = run_experiment(cases, strategies=["react", "plan_execute"], providers=["mock"],
