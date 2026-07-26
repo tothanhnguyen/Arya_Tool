@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Laplace's Demon — Báo cáo Sprint</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #111; margin: 0; font-size: 10.5pt; line-height: 1.55; }
+  h1 { font-size: 21pt; margin: 0 0 2px; letter-spacing: -0.5px; }
+  h2 { font-size: 13.5pt; border-bottom: 2px solid #111; padding-bottom: 4px; margin: 26px 0 10px; }
+  h3 { font-size: 11pt; margin: 14px 0 6px; }
+  .sub { color: #555; margin-bottom: 18px; }
+  .sprint { page-break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 9.5pt; }
+  th, td { border: 1px solid #999; padding: 4px 7px; text-align: left; vertical-align: top; }
+  th { background: #111; color: #fff; font-weight: 600; }
+  tr:nth-child(even) td { background: #f4f4f4; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 8.8pt; background: #eee; padding: 1px 4px; border-radius: 3px; }
+  .meta { font-size: 9pt; color: #444; margin: 2px 0 8px; }
+  .kq { border-left: 3px solid #111; padding: 4px 10px; background: #f7f7f7; margin: 8px 0; }
+  ul { margin: 4px 0 10px 18px; padding: 0; }
+  li { margin: 2px 0; }
+  .grid { display: flex; gap: 10px; margin: 12px 0; }
+  .tile { flex: 1; border: 1.5px solid #111; padding: 8px 10px; text-align: center; }
+  .tile .num { font-size: 17pt; font-weight: 700; }
+  .tile .lbl { font-size: 8.5pt; color: #444; text-transform: uppercase; letter-spacing: 0.5px; }
+  .footer { margin-top: 28px; padding-top: 8px; border-top: 1px solid #999; font-size: 8.5pt; color: #666; }
+  .pb { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>Laplace's Demon</h1>
+<div class="sub">Báo cáo chi tiết các sprint đã thực hiện · Ngày làm việc chính: 26/07/2026 · Xuất bản: 27/07/2026</div>
+
+<div class="grid">
+  <div class="tile"><div class="num">7</div><div class="lbl">Sprint</div></div>
+  <div class="tile"><div class="num">40+</div><div class="lbl">Commit</div></div>
+  <div class="tile"><div class="num">167</div><div class="lbl">Test pass</div></div>
+  <div class="tile"><div class="num">66</div><div class="lbl">Eval case</div></div>
+  <div class="tile"><div class="num">12+</div><div class="lbl">Agent AI song song</div></div>
+</div>
+
+<p><b>Bối cảnh:</b> Đồ án cá nhân xây dựng AI Agent nhận yêu cầu qua Telegram, tự phân loại — lập kế hoạch — gọi công cụ — quan sát — trả lời, với trọng tâm là độ tin cậy, khả năng quan sát (trace) và đánh giá định lượng. Toàn bộ quá trình dưới đây được thực hiện bằng mô hình <b>nhiều phiên Claude + nhiều agent AI chạy song song</b>, phối hợp qua <code>PLAN_SONG_SONG.md</code> và bảng task chung <code>TASKS.md</code>.</p>
+
+<h2>Sprint 0 — Kế hoạch tổng thể (PLAN.md)</h2>
+<div class="sprint">
+<p class="meta">Đầu vào: file context handoff từ các cuộc trao đổi trước · Đầu ra: <code>PLAN.md</code></p>
+<ul>
+  <li>Chốt toàn bộ 11 quyết định còn mở của đồ án: use case chính (<i>trợ lý nghiên cứu &amp; báo cáo cá nhân</i>), tự xây agent loop thay vì dùng LangGraph, 6 tool cụ thể, scheduler tối giản, tiêu chí đánh giá 8 metric.</li>
+  <li>Xác định 3 đóng góp riêng: agent loop dạng state machine có trace đầy đủ · trace viewer trực quan · eval harness so sánh thực nghiệm 2 chiến lược × 2 model.</li>
+  <li>Lịch 20 tuần (08–12/2026), Definition of Done 5 điểm, bảng rủi ro &amp; đối sách, danh mục đề xuất bổ sung (spike kỹ thuật, replay trace, cost tracking…).</li>
+</ul>
+</div>
+
+<h2>Sprint 1 — MVP nền tảng + Review khắc nghiệt</h2>
+<div class="sprint">
+<p class="meta">Commit chính: <code>74946d3</code> (18:13) · Đội hình: 4 agent song song + 1 agent review</p>
+<h3>Xây dựng (4 agent song song)</h3>
+<ul>
+  <li><b>Contracts lõi</b> (viết trước để team bám chung): config, 9 bảng SQLAlchemy, Pydantic schemas, protocol LLMProvider + MockLLM, tool registry với confirm động theo tham số.</li>
+  <li><b>Agent Tools:</b> 6 tool (web_search stub/Tavily, fetch_page, note_store, task_list, report_builder, scheduler) — cách ly dữ liệu theo user, không bao giờ raise.</li>
+  <li><b>Agent Core:</b> state machine <code>run_task/resume_task</code>, 2 chiến lược ReAct + Plan-Execute cắm chung interface, structured output + self-correction, human-in-the-loop pause/resume qua <code>state_json</code>.</li>
+  <li><b>Agent Interfaces:</b> FastAPI Task API, trace viewer monochrome, bot aiogram với nút xác nhận ✅/❌, APScheduler.</li>
+  <li><b>Agent Packaging:</b> OpenAI provider, Docker, README, .env.example.</li>
+</ul>
+<h3>Review (1 agent độc lập) — 7 phát hiện, sửa 7/7</h3>
+<table>
+<tr><th>Mức</th><th>Lỗi</th><th>Cách sửa</th></tr>
+<tr><td>Critical</td><td>SQLite self-deadlock: agent loop giữ write-lock suốt vòng lặp → tool ghi DB treo 5s rồi "database is locked"</td><td>Commit session trước khi thực thi tool + WAL + busy_timeout</td></tr>
+<tr><td>Important</td><td>IDOR: REST API không kiểm soát quyền</td><td>API key tùy chọn (header <code>X-API-Key</code>)</td></tr>
+<tr><td>Important</td><td>Race double-execute khi 2 request confirm đồng thời</td><td>Compare-and-set nguyên tử <code>UPDATE … WHERE status='awaiting_confirm'</code></td></tr>
+<tr><td>Important</td><td>Tool/task timeout khai báo nhưng không enforce</td><td>Worker thread + cutoff; deadline mỗi vòng lặp</td></tr>
+<tr><td>Important</td><td>OpenAI strict-schema không tương thích schema Pydantic</td><td>json_object mode + schema trong system message</td></tr>
+<tr><td>Minor ×2</td><td>Nút confirm không kiểm tra chủ task; file report ghi đè nhau</td><td>So khớp <code>tg_id</code>; namespace <code>u&lt;user&gt;-t&lt;task&gt;-</code></td></tr>
+</table>
+<div class="kq"><b>Kết quả sprint:</b> 43 test pass · smoke test end-to-end · bot Telegram thật lên sóng (<code>@matxanh_bot</code>, sau khi phát hiện và xử lý xung đột polling với bot cũ) · 1 commit lớn sạch sẽ.</div>
+</div>
+
+<h2>Sprint 2 — Tài liệu</h2>
+<div class="sprint">
+<p class="meta">Commit: <code>ed8ae44</code> (18:33)</p>
+<ul>
+  <li><code>docs/HUONG_DAN.md</code>: cài đặt, bảng env, cách dùng bot, REST API, troubleshooting.</li>
+  <li><code>docs/KIEN_TRUC.md</code>: 3 sơ đồ Mermaid (thành phần, state machine, ERD), so sánh 2 chiến lược, 10 lớp an toàn, các quyết định thiết kế kèm lý do — chuẩn bị cho phản biện.</li>
+</ul>
+</div>
+
+<h2>Sprint 3 — Khung Eval Harness</h2>
+<div class="sprint">
+<p class="meta">Commit: <code>8ebbfb2</code> (18:42)</p>
+<ul>
+  <li>Case YAML khai báo đủ chiều: expected (status/route/tools/forbid/answer), confirm approve/reject, giả lập lỗi tool (<code>fail_once/fail_always</code>), seed dữ liệu, <code>mock_script</code> phát lại LLM.</li>
+  <li>Runner: mỗi case một DB sạch, chạy <b>agent loop production thật</b>, tự xử lý confirm-flow, chấm rule-based, 8 metric, xuất <code>results.json</code> + <code>report.md</code>.</li>
+  <li>13 case đầu; cùng bộ case chạy được cả mock (regression, deterministic) lẫn LLM thật (số liệu).</li>
+</ul>
+</div>
+
+<h2 class="pb">Sprint 4 — Gemini + Số liệu thật đầu tiên + Thí nghiệm before/after</h2>
+<div class="sprint">
+<p class="meta">Commit: <code>c1dac80</code> (20:36) · Model: gemini-3.1-flash-lite (free tier)</p>
+<ul>
+  <li>Gemini qua endpoint tương thích OpenAI — dùng chung adapter, thêm retry 429 đọc "retry in Xs" (free tier giới hạn theo phút <b>và theo ngày</b>, mỗi model một quota — bài học: gemini-3.6-flash chỉ 20 req/ngày).</li>
+  <li><b>Phát hiện vàng:</b> model lite <i>bịa tên tool</i> (<code>google_search</code>, <code>save_note</code>…) dù prompt có đủ specs → mitigation: nhắc danh sách tên hợp lệ ngay cạnh yêu cầu JSON.</li>
+</ul>
+<table>
+<tr><th>Metric (13 case gốc)</th><th>Trước fix</th><th>Sau fix</th></tr>
+<tr><td>Success rate</td><td>0.31</td><td><b>0.46</b> (+50%)</td></tr>
+<tr><td>Tool-selection accuracy</td><td>0.31</td><td><b>0.46</b></td></tr>
+<tr><td>Route accuracy</td><td>0.67</td><td>0.67</td></tr>
+</table>
+<div class="kq">Thí nghiệm đúng chuẩn: giả thuyết → can thiệp 1 dòng prompt → đo lường → phân tích 3 nhóm lỗi còn lại (gọi đúng tool nhưng vụng · phân loại sai · câu chữ).</div>
+</div>
+
+<h2>Sprint 5 — Đợt nâng cấp song song thứ hai</h2>
+<div class="sprint">
+<p class="meta">Commit: <code>45238c0</code> (20:46) · Đội hình: 4 agent song song</p>
+<ul>
+  <li>Bộ eval 13 → <b>37 case</b> (error-path, self-correction, double-confirm, injection, tiếng Việt).</li>
+  <li><b>LLM-as-judge</b>: chấm chất lượng câu trả lời bằng model riêng (<code>--judge</code>), metric judge_pass_rate.</li>
+  <li>Graceful shutdown (thủ phạm: uvicorn chiếm signal handler) · scheduler tự nạp job mới · trace viewer thêm cột route · docs đồng bộ.</li>
+</ul>
+</div>
+
+<h2>Sprint 6 — Đa terminal: hardening, thí nghiệm 2×2, deploy, báo cáo</h2>
+<div class="sprint">
+<p class="meta">21:07–23:22 · Mô hình: 4 worktree + bảng task chung <code>TASKS.md</code> (nhận task theo luật DOING/DONE, không giẫm file của nhau)</p>
+<table>
+<tr><th>Nhánh</th><th>Việc hoàn thành</th><th>Commit tiêu biểu</th></tr>
+<tr><td><b>T1 — Eval 66 case</b></td><td>37 → <b>66 case</b> (6 nhóm mới, file 13–18), mock 66/66</td><td><code>35323a2</code></td></tr>
+<tr><td><b>T3 — Hardening</b></td><td>Chống prompt injection nội dung web (sanitize delimiter chống breakout) · error taxonomy + retry/backoff · rate limit theo user · schema chặt + đếm self-correction · tối ưu classify prompt kèm ví dụ, tool description dạng USE FOR / DO NOT USE FOR</td><td><code>9c3c294</code> <code>3585565</code> <code>915433a</code> <code>10ff304</code> <code>28ca432</code></td></tr>
+<tr><td><b>T2 — Thí nghiệm 2×2</b></td><td>Runner ma trận chiến lược × model: checkpoint/<b>resume</b>, retry rate-limit, biểu đồ 9 metric; chạy ma trận cuối mock 66 case × 3 run × 2 chiến lược (396 run) + Gemini minh họa</td><td><code>503a84b</code> <code>8ea9d2b</code></td></tr>
+<tr><td><b>T4 — Deploy + báo cáo</b></td><td>Docker healthcheck + .dockerignore · README từng bước · khung + nội dung báo cáo LaTeX (vấn đề → kiến trúc → thực nghiệm) · bộ slide bảo vệ · kịch bản demo + 20 câu phản biện</td><td><code>88eadc5</code> <code>d4be6ec</code> <code>2394c5a</code> <code>5988382</code></td></tr>
+<tr><td><b>Task phụ T5–T12</b></td><td>Streaming tiến độ về Telegram (edit message) · chế độ replay trace (demo offline) · search cache · trần chi phí LLM mỗi task (BudgetedLLM) · cột chi phí trong trace viewer</td><td><code>61af623</code> <code>d8b9fff</code> <code>525e31b</code> <code>0304cff</code> <code>5559ecd</code></td></tr>
+<tr><td><b>Main — tinh chỉnh chấm</b></td><td>Nới <code>tools_match</code> exact→set cho 20 case không có tool lặp (hết phạt oan retry-thành-công) · 3 case wording chuyển sang judge · xác thực bằng model thật</td><td><code>58586cc</code> <code>f739f2a</code></td></tr>
+</table>
+<div class="kq"><b>Số liệu ma trận cuối (mock, 66 case × 3 run):</b> ReAct — success 0.864, tool-accuracy 0.892, route 0.842, recovery 0.667. (Ô chéo chiến lược trong ma trận mock chỉ để kiểm chứng runner — script gắn với chiến lược gốc của case.) Số liệu Gemini thật của bộ đầy đủ sẽ chạy lại khi quota ngày reset.</div>
+</div>
+
+<h2>Tiến hóa số liệu qua các sprint</h2>
+<table>
+<tr><th>Mốc</th><th>Test</th><th>Eval case</th><th>Success (LLM thật, 13 case)</th><th>Ghi chú</th></tr>
+<tr><td>Sprint 1 — MVP + review</td><td>43</td><td>—</td><td>—</td><td>7/7 lỗi review đã sửa</td></tr>
+<tr><td>Sprint 3 — Harness</td><td>45</td><td>13</td><td>—</td><td>mock 13/13</td></tr>
+<tr><td>Sprint 4 — Gemini</td><td>45</td><td>13</td><td>0.31 → <b>0.46</b></td><td>before/after prompt fix</td></tr>
+<tr><td>Sprint 5 — Nâng cấp</td><td>48</td><td>37</td><td>0.49 (37 case)</td><td>+ judge, graceful shutdown</td></tr>
+<tr><td>Sprint 6 — Đa terminal</td><td><b>167</b></td><td><b>66</b></td><td>ma trận mock 396 run</td><td>hardening + exp + báo cáo + slide</td></tr>
+</table>
+
+<h2>Bài học rút ra (đưa vào chương thảo luận của báo cáo)</h2>
+<ul>
+  <li><b>Trace-first trả lãi ngay:</b> mọi phát hiện quan trọng (bịa tên tool, deadlock, model không fallback) đều tìm ra bằng cách soi trace, không phải đoán.</li>
+  <li><b>Eval phân biệt "chấm oan" và "lỗi thật":</b> tiêu chí exact-match phạt cả hành vi tự sửa lỗi thành công; nới có nguyên tắc + judge ngữ nghĩa giúp số liệu phản ánh đúng năng lực model.</li>
+  <li><b>Free-tier là một ràng buộc thiết kế:</b> retry đọc retryDelay, checkpoint/resume, cache và trần chi phí per-task đều sinh ra từ va chạm quota thực tế.</li>
+  <li><b>Song song hóa cần luật:</b> bản đồ sở hữu file + bảng task DOING/DONE cho phép 4+ phiên AI làm việc đồng thời không conflict; thứ tự merge (hardening trước số liệu cuối) giữ tính hợp lệ của thí nghiệm.</li>
+</ul>
+
+<h2>Việc còn mở</h2>
+<ul>
+  <li>Chạy ma trận Gemini đầy đủ (66 case × 3 run × 2 chiến lược) khi quota ngày reset — runner đã sẵn checkpoint/resume.</li>
+  <li>Quay video demo dự phòng; tổng duyệt kịch bản bảo vệ.</li>
+  <li>Cân nhắc model thứ hai (key trả phí) cho trục so sánh model đúng nghĩa 2×2.</li>
+</ul>
+
+<div class="footer">Laplace's Demon · Báo cáo sprint tự động tổng hợp từ git history, TASKS.md và eval_results/ · Repo: ~/Documents/Laplace_Demon</div>
+
+</body>
+</html>
