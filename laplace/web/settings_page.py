@@ -12,7 +12,8 @@ Bao mat:
   mask_key(); thong bao loi cung duoc loc de khong lot key.
 """
 
-from urllib.parse import parse_qs
+import secrets
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -27,14 +28,48 @@ from laplace.web.traceview import templates
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
+# Token per-process: form phai gui lai dung token nay (chong CSRF, lop 3).
+# Sinh moi lan khoi dong — trang web ngoai khong doc duoc (SOP), form that thi co.
+CSRF_TOKEN = secrets.token_urlsafe(32)
+
+
+def _hostname_of(value: str | None) -> str | None:
+    """Lay hostname (bo port) tu header Host/Origin/Referer; None neu khong parse duoc."""
+    if not value:
+        return None
+    try:
+        # Host header khong co scheme -> them // de urlsplit hieu la netloc
+        parsed = urlsplit(value if "//" in value else f"//{value}")
+        return parsed.hostname
+    except ValueError:
+        return None
+
+
 def require_loopback(request: Request) -> None:
-    """403 moi request khong den tu loopback — ke ca khi server bind 0.0.0.0."""
+    """403 moi request khong den tu loopback — ke ca khi server bind 0.0.0.0.
+
+    Chong ca CSRF/DNS-rebinding (lop 1+2):
+    - Host header phai la loopback: trang web ngoai dung DNS rebinding se mang
+      Host la domain cua no -> chan.
+    - Origin/Referer (neu trinh duyet gui — form POST cross-site luon gui Origin)
+      cung phai la loopback: form an tren trang web la tu POST vao day se bi chan
+      du request xuat phat tu trinh duyet cua chinh chu may (IP loopback).
+    """
     client = request.client
     if client is None or client.host not in LOOPBACK_HOSTS:
         raise HTTPException(
             status_code=403,
             detail="Trang Settings chi truy cap duoc tu chinh may chay server (loopback).",
         )
+    if _hostname_of(request.headers.get("host")) not in LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail="Host header khong phai loopback.")
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if value and _hostname_of(value) not in LOOPBACK_HOSTS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"{header.capitalize()} khong phai loopback — tu choi (chong CSRF).",
+            )
 
 
 router = APIRouter(
@@ -89,6 +124,7 @@ def _page_context(
         "error": error,
         "success": success,
         "active_nav": "settings",
+        "csrf_token": CSRF_TOKEN,
     }
 
 
@@ -108,6 +144,10 @@ async def settings_save(request: Request):
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     form = {k: v[0] for k, v in parse_qs(body).items()}
+    # Lop 3 chong CSRF: form phai mang dung token per-process (trang ngoai
+    # khong doc duoc token nay do same-origin policy).
+    if not secrets.compare_digest(form.get("csrf", ""), CSRF_TOKEN):
+        raise HTTPException(status_code=403, detail="CSRF token sai hoac thieu.")
     provider = form.get("provider", "")
     api_key = form.get("api_key", "").strip()
     model = form.get("model", "").strip()
