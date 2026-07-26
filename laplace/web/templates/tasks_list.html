@@ -13,6 +13,7 @@
       <th class="num">Cost (USD)</th>
       <th class="num">Duration</th>
       <th class="num">Created</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
@@ -26,6 +27,7 @@
       <td class="num">{{ "%.6f"|format(t.cost_usd) }}</td>
       <td class="num">{% if t.duration_s is not none %}{{ t.duration_s }}s{% else %}—{% endif %}</td>
       <td class="num">{{ t.created_at }}</td>
+      <td><a href="/tasks/{{ t.id }}/replay">▶ Replay</a></td>
     </tr>
     {% endfor %}
   </tbody>

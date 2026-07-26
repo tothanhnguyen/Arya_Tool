@@ -13,6 +13,7 @@
     <span class="meta">
       {{ task.created_at or "" }}{% if task.finished_at %} → {{ task.finished_at }}{% endif %}
       {% if auto_refresh %} · auto-refresh 5s{% endif %}
+      · <a href="/tasks/{{ task.id }}/replay">▶ Replay</a>
     </span>
   </div>
   <div class="card-body">
