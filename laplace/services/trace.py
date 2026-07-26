@@ -1,5 +1,6 @@
 """Ghi va doc execution trace: steps + llm_calls cua moi task."""
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -58,6 +59,86 @@ def record_llm_call(
     session.add(call)
     session.flush()
     return call
+
+
+def replay_events(session: Session, task_id: int) -> dict[str, Any]:
+    """Serialize trace thanh danh sach su kien theo thu tu thoi gian, phuc vu
+    che do replay (demo offline, khong can mang/LLM).
+
+    Moi su kien: kind (llm_call | step | finish), title, latency_ms, at, detail.
+    """
+    trace = task_trace(session, task_id)
+    if not trace:
+        return {}
+
+    steps = session.scalars(
+        select(Step).where(Step.task_id == task_id).order_by(Step.idx)
+    ).all()
+    calls = session.scalars(
+        select(LLMCall).where(LLMCall.task_id == task_id).order_by(LLMCall.id)
+    ).all()
+
+    events: list[tuple[tuple, dict[str, Any]]] = []
+    for c in calls:
+        events.append(
+            (
+                # LLM call duoc ghi truoc step cung thoi diem -> uu tien 0
+                (c.created_at or datetime.min, 0, c.id),
+                {
+                    "kind": "llm_call",
+                    "title": f"LLM · {c.purpose}",
+                    "latency_ms": c.latency_ms,
+                    "at": c.created_at.isoformat() if c.created_at else None,
+                    "detail": {
+                        "provider": c.provider,
+                        "model": c.model,
+                        "prompt_tokens": c.prompt_tokens,
+                        "completion_tokens": c.completion_tokens,
+                        "cost_usd": c.cost_usd,
+                    },
+                },
+            )
+        )
+    for s in steps:
+        events.append(
+            (
+                (s.created_at or datetime.min, 1, s.id),
+                {
+                    "kind": "step",
+                    "title": f"Step {s.idx} · {s.tool}",
+                    "latency_ms": s.latency_ms,
+                    "at": s.created_at.isoformat() if s.created_at else None,
+                    "detail": {
+                        "idx": s.idx,
+                        "tool": s.tool,
+                        "status": s.status,
+                        "params": s.params_json,
+                        "observation": s.observation_json,
+                        "retries": s.retries,
+                    },
+                },
+            )
+        )
+    events.sort(key=lambda pair: pair[0])
+    ordered = [ev for _, ev in events]
+
+    task = trace["task"]
+    if task["status"] in {"done", "failed"}:
+        ordered.append(
+            {
+                "kind": "finish",
+                "title": f"Ket thuc · {task['status']}",
+                "latency_ms": 0,
+                "at": task["finished_at"],
+                "detail": {
+                    "status": task["status"],
+                    "result": task["result"],
+                    "error": task["error"],
+                },
+            }
+        )
+
+    return {"task": task, "totals": trace["totals"], "events": ordered}
 
 
 def task_trace(session: Session, task_id: int) -> dict[str, Any]:

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Replay task #{{ task.id }} — Laplace's Demon{% endblock %}
+{% block head %}
+{% if auto and next_delay_s is not none %}
+<meta http-equiv="refresh" content="{{ next_delay_s }};url=/tasks/{{ task.id }}/replay?upto={{ upto + 1 }}&auto=1&speed={{ speed }}#cursor">
+{% endif %}
+<style>
+  .replay-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: #fff; border: 1px solid #111; padding: 10px 12px; margin-bottom: 14px;
+    position: sticky; top: 0; z-index: 5;
+  }
+  .replay-bar .btn {
+    display: inline-block; padding: 4px 12px; border: 1px solid #111;
+    background: #fff; color: #111; text-decoration: none; font-weight: 700;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .replay-bar .btn:hover { background: #111; color: #fff; }
+  .replay-bar .btn.primary { background: #111; color: #fff; }
+  .replay-bar .btn.primary:hover { background: #fff; color: #111; }
+  .replay-bar .btn.disabled { border-color: #ccc; color: #ccc; pointer-events: none; }
+  .replay-bar .counter { font-weight: 700; margin-left: auto; white-space: nowrap; }
+  .replay-bar .speed { font-size: 12px; color: #777; white-space: nowrap; }
+  .replay-bar .speed a { text-decoration: none; padding: 2px 5px; color: #777; }
+  .replay-bar .speed a.on { color: #fff; background: #111; font-weight: 700; }
+  .progress { height: 6px; background: #e5e5e5; border: 1px solid #111; margin-bottom: 18px; }
+  .progress .fill { height: 100%; background: #111; width: {{ progress_pct }}%; transition: width 0.3s; }
+  .ev-llm .card-head { background: #eef; }
+  .ev-finish { border: 2px solid #111; }
+  #cursor { outline: 2px solid #111; outline-offset: 2px; }
+  .replay-done {
+    border: 2px solid #111; background: #fff; padding: 14px 16px;
+    font-weight: 700; margin-top: 10px;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span class="step-idx">{{ task.id }}</span>
+    <span class="badge st-{{ task.status }}">{{ task.status }}</span>
+    <span>{{ task.strategy }}</span>
+    {% if task.route %}<span class="badge">{{ task.route }}</span>{% endif %}
+    <span class="meta">REPLAY · trace da luu, khong goi mang/LLM · <a href="/tasks/{{ task.id }}">xem trace tinh</a></span>
+  </div>
+  <div class="card-body">
+    <div class="label">Request</div>
+    <div class="req-block">{{ task.request }}</div>
+  </div>
+</div>
+
+<div class="replay-bar">
+  <a class="btn {% if upto <= 0 %}disabled{% endif %}" href="/tasks/{{ task.id }}/replay?upto=0&speed={{ speed }}">⏮ Restart</a>
+  <a class="btn {% if upto <= 0 %}disabled{% endif %}" href="/tasks/{{ task.id }}/replay?upto={{ upto - 1 }}&speed={{ speed }}">‹ Prev</a>
+  <a class="btn {% if finished %}disabled{% endif %}" href="/tasks/{{ task.id }}/replay?upto={{ upto + 1 }}&speed={{ speed }}#cursor">Next ›</a>
+  {% if auto %}
+  <a class="btn primary" href="/tasks/{{ task.id }}/replay?upto={{ upto }}&speed={{ speed }}">⏸ Pause</a>
+  {% else %}
+  <a class="btn {% if finished %}disabled{% endif %}" href="/tasks/{{ task.id }}/replay?upto={{ upto }}&auto=1&speed={{ speed }}">▶ Auto</a>
+  {% endif %}
+  <span class="speed">
+    speed:
+    {% for sp in speeds %}
+    <a class="{% if sp == speed %}on{% endif %}" href="/tasks/{{ task.id }}/replay?upto={{ upto }}&auto={{ auto }}&speed={{ sp }}">{{ sp }}x</a>
+    {% endfor %}
+  </span>
+  <span class="counter">{{ upto }}/{{ total }} su kien{% if auto %} · dang phat…{% endif %}</span>
+</div>
+<div class="progress"><div class="fill"></div></div>
+
+{% if events %}
+  {% for ev in events %}
+  <div class="card ev-{{ ev.kind }}"{% if loop.last %} id="cursor"{% endif %}>
+    <div class="card-head">
+      <span class="step-idx">{{ loop.index }}</span>
+      <span class="tool-name">{{ ev.title }}</span>
+      {% if ev.kind == "step" %}<span class="badge st-{{ ev.detail.status }}">{{ ev.detail.status }}</span>{% endif %}
+      {% if ev.kind == "finish" %}<span class="badge st-{{ ev.detail.status }}">{{ ev.detail.status }}</span>{% endif %}
+      <span class="meta">{{ ev.latency_ms }} ms{% if ev.at %} · {{ ev.at }}{% endif %}</span>
+    </div>
+    <div class="card-body">
+      {% if ev.kind == "step" %}
+        <div class="label">Params</div>
+        <pre>{{ ev.detail.params | tojson(indent=2) }}</pre>
+        <div class="label">Observation</div>
+        <pre>{{ ev.detail.observation | tojson(indent=2) }}</pre>
+      {% elif ev.kind == "llm_call" %}
+        <div class="label">LLM</div>
+        <div>{{ ev.detail.provider }} · {{ ev.detail.model or "?" }} · {{ ev.detail.prompt_tokens }}→{{ ev.detail.completion_tokens }} tok · ${{ "%.6f"|format(ev.detail.cost_usd) }}</div>
+      {% elif ev.kind == "finish" %}
+        {% if ev.detail.result %}
+        <div class="label">Result</div>
+        <div class="result-block">{{ ev.detail.result }}</div>
+        {% endif %}
+        {% if ev.detail.error %}
+        <div class="label">Error</div>
+        <div class="error-block">{{ ev.detail.error }}</div>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="empty">Bam <strong>Next</strong> hoac <strong>Auto</strong> de bat dau phat lai.</div>
+{% endif %}
+
+{% if finished %}
+<div class="replay-done" id="cursor-end">
+  ✔ Replay hoan tat — {{ total }} su kien · {{ totals.steps }} step ·
+  {{ totals.prompt_tokens }}+{{ totals.completion_tokens }} tok ·
+  ${{ "%.6f"|format(totals.cost_usd) }}
+</div>
+{% endif %}
+{% endblock %}
