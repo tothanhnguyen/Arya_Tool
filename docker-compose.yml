@@ -1,12 +1,17 @@
 services:
   laplace:
     build: .
-    env_file: .env
+    # .env khong bat buoc: thieu thi app chay provider mock (khong can key nao).
+    # Cu phap dai (required: false) can Docker Compose >= 2.24.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # SQLite nam trong volume ./data de giu du lieu qua cac lan restart
       LAPLACE_DB_URL: sqlite:////app/data/laplace.db
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data # laplace.db (+ -wal/-shm)
+      - ./reports:/app/reports # bao cao markdown do tool report_builder tao
     restart: unless-stopped

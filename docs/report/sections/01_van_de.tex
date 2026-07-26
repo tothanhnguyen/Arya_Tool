@@ -1,0 +1,82 @@
+\section{Vấn đề}
+\label{sec:van-de}
+
+\subsection{Bối cảnh}
+
+Các mô hình ngôn ngữ lớn (LLM) đã vượt qua vai trò công cụ hỏi--đáp: khi được
+ghép với khả năng gọi công cụ (tool calling), chúng có thể \emph{hành động} ---
+tìm kiếm thông tin, đọc trang web, ghi dữ liệu, lên lịch --- thay vì chỉ sinh
+văn bản. Lớp hệ thống này thường được gọi là \emph{AI agent}: LLM đóng vai trò
+bộ điều khiển, quyết định bước tiếp theo dựa trên yêu cầu của người dùng và
+quan sát thu được từ môi trường~\cite{yao2023react}.
+
+Tuy nhiên, khoảng cách giữa một bản demo agent và một hệ thống dùng được hằng
+ngày là rất lớn. Ba vấn đề nổi bật:
+
+\begin{enumerate}
+  \item \textbf{Độ tin cậy.} LLM không tất định và có thể ``ảo giác'': chọn sai
+        công cụ, bịa tên công cụ không tồn tại, lặp vô hạn, hoặc thực hiện hành
+        động có hại (xóa dữ liệu) mà người dùng không hay biết. Một agent hữu
+        dụng phải có các lớp chặn tường minh: giới hạn số bước, timeout, xác
+        nhận của con người trước hành động ghi/xóa.
+  \item \textbf{Khả năng quan sát.} Khi agent trả lời sai hoặc hành xử lạ, câu
+        hỏi ``nó vừa làm gì và vì sao'' phải trả lời được. Đa số demo agent chỉ
+        ghi log rời rạc; việc dựng lại toàn bộ chuỗi quyết định (prompt nào,
+        công cụ nào, tham số gì, quan sát gì, tốn bao nhiêu token) thường là
+        không thể.
+  \item \textbf{Đánh giá định lượng.} Hành vi agent phụ thuộc mô hình, prompt
+        và chiến lược điều phối. Không có bộ đo lặp lại được thì mọi thay đổi
+        (đổi model, sửa prompt) đều là cảm tính --- không biết hệ thống tốt lên
+        hay xấu đi.
+\end{enumerate}
+
+\subsection{Bài toán}
+
+Đồ án đặt bài toán: xây dựng một \textbf{AI agent cá nhân} giao tiếp qua
+Telegram, tự thực hiện trọn vẹn vòng lặp \emph{nhận yêu cầu $\to$ phân tích
+$\to$ lập kế hoạch $\to$ gọi công cụ $\to$ quan sát $\to$ điều chỉnh $\to$ trả
+lời} trên một bộ công cụ thực dụng (tìm kiếm web, đọc trang, ghi chú, việc cần
+làm, viết báo cáo, lên lịch định kỳ), với ba yêu cầu xuyên suốt tương ứng ba
+vấn đề trên:
+
+\begin{itemize}
+  \item \textbf{An toàn theo lớp}: giới hạn bước và timeout ở mọi tầng; hành
+        động ghi/xóa phải qua xác nhận người dùng (human-in-the-loop) với cơ
+        chế tạm dừng/tiếp tục bền vững qua restart.
+  \item \textbf{Trace là công dân hạng nhất}: mọi lệnh gọi LLM và mọi lần chạy
+        công cụ đều được ghi vào cơ sở dữ liệu; một trace viewer dựng lại được
+        toàn bộ timeline kèm token, chi phí, độ trễ.
+  \item \textbf{Đánh giá tự động}: một eval harness chạy bộ test case cố định
+        qua chính agent loop production, chấm tự động và xuất bảng metric ---
+        làm nền cho thí nghiệm so sánh chiến lược và mô hình.
+\end{itemize}
+
+Tên dự án lấy ẩn dụ từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực
+thể biết toàn bộ trạng thái hiện tại của vũ trụ và từ đó suy ra tương lai ---
+ở đây tượng trưng cho nguyên tắc thiết kế: agent \emph{quyết định dựa trên
+trạng thái quan sát được và được ghi lại đầy đủ}, chứ không phải tuyên bố hệ
+thống ``biết mọi thứ''.
+
+\subsection{Phạm vi và đóng góp}
+
+Phạm vi MVP: một người dùng cá nhân (hoặc nhóm nhỏ), một tiến trình, kênh
+Telegram, 6 công cụ, SQLite. Ngoài phạm vi: multi-agent, RAG/vector memory,
+hạ tầng phân tán.
+
+Đóng góp chính của đồ án:
+
+\begin{enumerate}
+  \item Một agent loop \textbf{tự xây dựng} (không dùng framework agent) dưới
+        dạng state machine tường minh, hỗ trợ hai chiến lược điều phối cắm
+        chung một interface: ReAct~\cite{yao2023react} và
+        Plan-and-Execute~\cite{wang2023planandsolve};
+  \item Cơ chế human-in-the-loop \textbf{bền vững}: trạng thái tạm dừng lưu
+        trong DB, tiếp tục được ở tiến trình khác, chống thực thi kép bằng
+        compare-and-set;
+  \item Hệ thống trace đầy đủ + trace viewer, dùng chung một nguồn dữ liệu cho
+        cả gỡ lỗi lẫn đánh giá;
+  \item Eval harness với 37 test case thuộc 8 nhóm (bao gồm cả prompt
+        injection và phục hồi lỗi), 9 metric, tùy chọn
+        LLM-as-judge~\cite{zheng2023judge}; và thí nghiệm so sánh
+        $2 \times 2$ (chiến lược $\times$ mô hình).
+\end{enumerate}
