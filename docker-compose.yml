@@ -1,0 +1,12 @@
+services:
+  laplace:
+    build: .
+    env_file: .env
+    environment:
+      # SQLite nam trong volume ./data de giu du lieu qua cac lan restart
+      LAPLACE_DB_URL: sqlite:////app/data/laplace.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

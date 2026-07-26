@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }} — Laplace's Demon{% endblock %}
+{% block head %}
+{% if auto_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span class="step-idx">{{ task.id }}</span>
+    <span class="badge st-{{ task.status }}">{{ task.status }}</span>
+    <span>{{ task.strategy }}</span>
+    <span class="meta">
+      {{ task.created_at or "" }}{% if task.finished_at %} → {{ task.finished_at }}{% endif %}
+      {% if auto_refresh %} · auto-refresh 5s{% endif %}
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="label">Request</div>
+    <div class="req-block">{{ task.request }}</div>
+    {% if task.result %}
+    <div class="label">Result</div>
+    <div class="result-block">{{ task.result }}</div>
+    {% endif %}
+    {% if task.error %}
+    <div class="label">Error</div>
+    <div class="error-block">{{ task.error }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<h2>Timeline ({{ steps|length }} step{{ "s" if steps|length != 1 else "" }})</h2>
+{% if steps %}
+  {% for s in steps %}
+  <div class="card">
+    <div class="card-head">
+      <span class="step-idx">{{ s.idx }}</span>
+      <span class="tool-name">{{ s.tool }}</span>
+      <span class="badge st-{{ s.status }}">{{ s.status }}</span>
+      <span class="meta">{{ s.latency_ms }} ms · retries {{ s.retries }}</span>
+    </div>
+    <div class="card-body">
+      <div class="label">Params</div>
+      <pre>{{ s.params | tojson(indent=2) }}</pre>
+      <div class="label">Observation</div>
+      <pre>{{ s.observation | tojson(indent=2) }}</pre>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="empty">Chưa có bước nào được ghi nhận.</div>
+{% endif %}
+
+<h2>LLM calls ({{ llm_calls|length }})</h2>
+{% if llm_calls %}
+<table>
+  <thead>
+    <tr>
+      <th>Purpose</th>
+      <th>Provider</th>
+      <th>Model</th>
+      <th class="num">Prompt tok</th>
+      <th class="num">Completion tok</th>
+      <th class="num">Cost (USD)</th>
+      <th class="num">Latency</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in llm_calls %}
+    <tr>
+      <td>{{ c.purpose }}</td>
+      <td>{{ c.provider }}</td>
+      <td>{{ c.model }}</td>
+      <td class="num">{{ c.prompt_tokens }}</td>
+      <td class="num">{{ c.completion_tokens }}</td>
+      <td class="num">{{ "%.6f"|format(c.cost_usd) }}</td>
+      <td class="num">{{ c.latency_ms }} ms</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">Chưa có LLM call nào.</div>
+{% endif %}
+
+<div class="totals">
+  <div class="tile"><div class="k">Steps</div><div class="v">{{ totals.steps }}</div></div>
+  <div class="tile"><div class="k">Prompt tokens</div><div class="v">{{ totals.prompt_tokens }}</div></div>
+  <div class="tile"><div class="k">Completion tokens</div><div class="v">{{ totals.completion_tokens }}</div></div>
+  <div class="tile"><div class="k">Total cost (USD)</div><div class="v">{{ "%.6f"|format(totals.cost_usd) }}</div></div>
+</div>
+{% endblock %}

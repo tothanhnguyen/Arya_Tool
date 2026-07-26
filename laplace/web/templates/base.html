@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Laplace's Demon{% endblock %}</title>
+  {% block head %}{% endblock %}
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #fafafa;
+      color: #111;
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 64px; }
+    header.site {
+      border-bottom: 2px solid #111;
+      padding-bottom: 14px;
+      margin-bottom: 26px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    header.site h1 { margin: 0; font-size: 19px; letter-spacing: 0.06em; text-transform: uppercase; }
+    header.site h1 a { color: #111; text-decoration: none; }
+    header.site .sub { color: #777; font-size: 12px; }
+    a { color: #111; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #ddd; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
+    th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #666; border-bottom: 2px solid #111; background: #f4f4f4;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f6f6f6; }
+    .num { text-align: right; white-space: nowrap; }
+    .badge {
+      display: inline-block; padding: 1px 8px; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border: 1px solid #111; border-radius: 2px; white-space: nowrap;
+    }
+    .badge.st-pending { color: #888; border-color: #aaa; background: #fff; }
+    .badge.st-running { color: #111; background: #fff; border-style: dashed; }
+    .badge.st-awaiting_confirm { color: #111; background: #e8e8e8; }
+    .badge.st-done { color: #fff; background: #111; }
+    .badge.st-failed { color: #fff; background: #666; border-color: #666; text-decoration: line-through; }
+    .badge.st-ok { color: #fff; background: #111; }
+    .badge.st-error, .badge.st-rejected { color: #fff; background: #666; border-color: #666; }
+    .badge.st-pending_confirm { color: #111; background: #e8e8e8; }
+    .card { background: #fff; border: 1px solid #ddd; margin-bottom: 14px; }
+    .card .card-head {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: #f4f4f4;
+    }
+    .card .card-body { padding: 10px 12px; }
+    .step-idx {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 26px; height: 26px; border: 2px solid #111; border-radius: 50%;
+      font-weight: 700; font-size: 12px; background: #fff;
+    }
+    .tool-name { font-weight: 700; }
+    .meta { color: #777; font-size: 12px; margin-left: auto; white-space: nowrap; }
+    pre {
+      margin: 6px 0 0; padding: 8px 10px; background: #f7f7f7;
+      border: 1px solid #e5e5e5; overflow-x: auto; font-size: 12px;
+      max-height: 260px; overflow-y: auto;
+    }
+    .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; margin-top: 8px; }
+    .label:first-child { margin-top: 0; }
+    h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin: 28px 0 12px; }
+    .totals { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .totals .tile { border: 1px solid #111; background: #fff; padding: 8px 14px; min-width: 120px; }
+    .totals .tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; }
+    .totals .tile .v { font-size: 17px; font-weight: 700; }
+    .empty { color: #888; padding: 18px; text-align: center; border: 1px dashed #ccc; background: #fff; }
+    .req-block { background: #fff; border-left: 3px solid #111; padding: 10px 14px; margin-bottom: 16px; white-space: pre-wrap; word-break: break-word; }
+    .result-block { background: #fff; border: 1px solid #111; padding: 10px 14px; white-space: pre-wrap; word-break: break-word; }
+    .error-block { background: #fff; border: 1px dashed #666; color: #666; padding: 10px 14px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <h1><a href="/">Laplace's Demon</a></h1>
+      <span class="sub">execution trace viewer — read-only</span>
+    </header>
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
