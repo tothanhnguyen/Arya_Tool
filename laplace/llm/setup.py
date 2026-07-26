@@ -12,7 +12,6 @@ mask_key() (6 ky tu dau + "..."); key chi duoc ghi vao .env, khong file khac.
 
 import getpass
 import os
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -61,14 +60,21 @@ def set_env_line(lines: list[str], key: str, value: str) -> list[str]:
     return out
 
 
+def _write_file_0600(path: Path, data: str) -> None:
+    """Mo file voi mode 600 NGAY TU LUC TAO (khong co khoang ho umask), roi ghi."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(data)
+    # file ton tai tu truoc thi O_CREAT khong doi quyen -> ep lai 600
+    os.chmod(path, 0o600)
+
+
 def write_env(path: Path, lines: list[str], *, backup: bool = True) -> None:
-    """Ghi .env: backup `.env.bak` truoc (neu file cu ton tai), chmod 600 ca hai."""
+    """Ghi .env: backup `.env.bak` truoc (neu file cu ton tai), ca hai deu 600 tu luc tao."""
     if backup and path.exists():
         bak = path.with_name(path.name + ".bak")
-        shutil.copy2(path, bak)
-        os.chmod(bak, 0o600)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+        _write_file_0600(bak, path.read_text(encoding="utf-8"))
+    _write_file_0600(path, "\n".join(lines) + "\n")
 
 
 # ------------------------------------------------------------ validate key
