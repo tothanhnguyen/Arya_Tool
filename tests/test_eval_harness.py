@@ -137,17 +137,22 @@ def test_experiment_forces_strategy_and_drops_stale_script():
     assert same.mock_script is not None
 
 
+def _fake_row(case, run_idx, err=None):
+    return {"id": case.id, "run": run_idx, "strategy": case.strategy, "tags": [],
+            "status": "done", "route": "direct", "checks": {"status": err is None},
+            "passed": err is None, "judge_reason": None, "error": err,
+            "steps": 0, "llm_calls": 1, "self_corrections": 0, "tokens": 20,
+            "prompt_tokens": 10, "completion_tokens": 10, "cost_usd": 0.0,
+            "duration_s": 0.01}
+
+
 def test_experiment_retries_on_rate_limit(tmp_path, monkeypatch):
     calls = {"n": 0}
 
     def fake_run_case(case, *, provider, workdir, run_idx=0, judge_llm=None):
         calls["n"] += 1
         err = "RateLimitError: 429, please retry in 7s" if calls["n"] == 1 else None
-        return {"id": case.id, "run": run_idx, "strategy": case.strategy, "tags": [],
-                "status": "done", "route": "direct", "checks": {"status": err is None},
-                "passed": err is None, "judge_reason": None, "error": err,
-                "steps": 0, "llm_calls": 1, "tokens": 20, "prompt_tokens": 10,
-                "completion_tokens": 10, "cost_usd": 0.0, "duration_s": 0.01}
+        return _fake_row(case, run_idx, err)
 
     slept: list[float] = []
     monkeypatch.setattr(experiment, "run_case", fake_run_case)
@@ -167,3 +172,36 @@ def test_experiment_estimates_cost_for_unpriced_model():
     experiment._estimate_cost(row, "gemini")  # gemini-3.1-flash-lite: fallback pricing
     assert row["cost_usd"] > 0
     assert row["cost_estimated"] is True
+
+
+def test_experiment_passes_judge_llm_to_run_case(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run_case(case, *, provider, workdir, run_idx=0, judge_llm=None):
+        seen["judge_llm"] = judge_llm
+        return _fake_row(case, run_idx)
+
+    monkeypatch.setattr(experiment, "run_case", fake_run_case)
+    run_experiment(_mini_cases(), strategies=["react"], providers=["mock"], runs=1,
+                   out_dir=tmp_path, name="t3", charts=False, judge_provider="mock")
+    assert isinstance(seen["judge_llm"], MockLLM)
+
+
+def test_experiment_stops_without_checkpoint_when_quota_exhausted(tmp_path, monkeypatch):
+    def fake_run_case(case, *, provider, workdir, run_idx=0, judge_llm=None):
+        return _fake_row(case, run_idx, err="RateLimitError: 429 daily quota exceeded")
+
+    monkeypatch.setattr(experiment, "run_case", fake_run_case)
+    monkeypatch.setattr(experiment.time, "sleep", lambda s: None)
+    res = run_experiment(_mini_cases(), strategies=["react"], providers=["mock"], runs=1,
+                         out_dir=tmp_path, name="t4", charts=False, max_case_retries=1)
+    assert res["meta"]["partial"] is True
+    assert res["meta"]["executed"] == 0  # run loi khong duoc tinh la xong
+    ckpt = Path(res["out_dir"]) / "checkpoint.jsonl"
+    assert not ckpt.exists() or not ckpt.read_text().strip()  # khong ghi row loi
+
+
+def test_self_corrections_metric_in_aggregate():
+    rows = [dict(_fake_row(_mini_cases()[0], i), self_corrections=n)
+            for i, n in enumerate((0, 2))]
+    assert aggregate(rows)["avg_self_corrections"] == 1.0

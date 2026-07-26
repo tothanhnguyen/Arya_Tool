@@ -61,13 +61,20 @@ METRIC_KEYS = (
     "success_rate",
     "route_accuracy",
     "tool_selection_accuracy",
+    "judge_pass_rate",
     "recovery_rate",
+    "avg_self_corrections",
     "avg_steps",
     "avg_llm_calls",
     "avg_tokens",
     "avg_cost_usd",
     "avg_duration_s",
+    "p95_duration_s",
 )
+
+
+class QuotaExhausted(Exception):
+    """Loi tam thoi (rate limit/quota) van con sau khi da retry het — dung de resume sau."""
 
 
 @dataclass(frozen=True)
@@ -131,12 +138,14 @@ def _run_case_resilient(
     *,
     max_retries: int,
     backoff_base: float,
+    judge_llm: Any = None,
 ) -> dict[str, Any]:
     """Chay 1 case; loi dang rate-limit/mang thi retry ca case voi backoff mu."""
     row: dict[str, Any] = {}
     for attempt in range(max_retries + 1):
         with chdir(work):
-            row = run_case(case, provider=cfg.provider, workdir=Path("."), run_idx=run_idx)
+            row = run_case(case, provider=cfg.provider, workdir=Path("."),
+                           run_idx=run_idx, judge_llm=judge_llm)
         db_file = work / f"db_{case.id}_{run_idx}.db"
         db_file.unlink(missing_ok=True)
         error = row.get("error")
@@ -187,6 +196,57 @@ def _summaries(rows: list[dict[str, Any]],
     return out
 
 
+def _hypothesis_section(summaries: dict[str, dict[str, Any]],
+                        meta: dict[str, Any]) -> list[str]:
+    """Doi chieu gia thuyet: Plan-Execute it buoc/re hon vs ReAct phuc hoi tot hon.
+
+    Chi xet provider LLM that (khac mock); can du ca 2 chien luoc de so sanh.
+    """
+    llm_providers = [p for p in meta.get("providers", []) if p != "mock"]
+    lines: list[str] = []
+    for provider in llm_providers:
+        react = summaries.get(f"react__{provider}")
+        plan = summaries.get(f"plan_execute__{provider}")
+        if not react or not plan:
+            continue
+        lines += ["", f"## Đối chiếu giả thuyết — `{provider}`", ""]
+
+        def cmp(metric: str, label: str, lower_better: bool) -> str:
+            rv, pv = react.get(metric), plan.get(metric)
+            if rv is None or pv is None:
+                return f"- **{label}**: thiếu số liệu ({metric}: react={rv}, plan={pv})."
+            plan_wins = (pv < rv) if lower_better else (pv > rv)
+            winner = "plan_execute" if plan_wins else ("react" if pv != rv else "hòa")
+            return (f"- **{label}** ({metric}): react={rv} vs plan_execute={pv}"
+                    f" → nghiêng về `{winner}`.")
+
+        lines.append(cmp("avg_steps", "Ít bước hơn (kỳ vọng: plan_execute)", True))
+        lines.append(cmp("avg_llm_calls", "Ít lượt gọi LLM hơn (kỳ vọng: plan_execute)", True))
+        lines.append(cmp("avg_cost_usd", "Rẻ hơn (kỳ vọng: plan_execute)", True))
+        lines.append(cmp("avg_tokens", "Ít token hơn (kỳ vọng: plan_execute)", True))
+        lines.append(cmp("recovery_rate", "Phục hồi lỗi tốt hơn (kỳ vọng: react)", False))
+        lines.append(cmp("success_rate", "Success rate tổng thể", False))
+        lines.append(cmp("avg_self_corrections", "Ít self-correction hơn", True))
+
+        steps_ok = (plan.get("avg_steps") or 0) < (react.get("avg_steps") or 0)
+        cost_ok = (plan.get("avg_cost_usd") or 0) < (react.get("avg_cost_usd") or 0)
+        rec_r, rec_p = react.get("recovery_rate"), plan.get("recovery_rate")
+        rec_ok = rec_r is not None and rec_p is not None and rec_r > rec_p
+        verdict1 = "ĐƯỢC ủng hộ" if (steps_ok and cost_ok) else (
+            "ủng hộ MỘT PHẦN" if (steps_ok or cost_ok) else "KHÔNG được ủng hộ")
+        verdict2 = ("ĐƯỢC ủng hộ" if rec_ok else "KHÔNG được ủng hộ") if (
+            rec_r is not None and rec_p is not None) else "thiếu số liệu"
+        lines += [
+            "",
+            f"**Kết luận**: Giả thuyết \"Plan-Execute ít bước/rẻ hơn\" {verdict1} "
+            f"(avg_steps {react.get('avg_steps')}→{plan.get('avg_steps')}, "
+            f"avg_cost_usd {react.get('avg_cost_usd')}→{plan.get('avg_cost_usd')}); "
+            f"giả thuyết \"ReAct phục hồi lỗi tốt hơn\" {verdict2} "
+            f"(recovery_rate react={rec_r} vs plan_execute={rec_p}).",
+        ]
+    return lines
+
+
 def _write_report(exp_dir: Path, meta: dict[str, Any],
                   summaries: dict[str, dict[str, Any]],
                   rows: list[dict[str, Any]]) -> None:
@@ -209,7 +269,7 @@ def _write_report(exp_dir: Path, meta: dict[str, Any],
         "| Metric | " + " | ".join(f"`{c}`" for c in cfg_ids) + " |",
         "|---|" + "---|" * len(cfg_ids),
     ]
-    for key in (*METRIC_KEYS, "p95_duration_s", "total_retries", "runs_total"):
+    for key in (*METRIC_KEYS, "total_retries", "runs_total"):
         cells = [str(summaries[c].get(key)) for c in cfg_ids]
         lines.append(f"| {key} | " + " | ".join(cells) + " |")
     lines += [
@@ -218,6 +278,7 @@ def _write_report(exp_dir: Path, meta: dict[str, Any],
         "> mới có ý nghĩa số liệu (mock_script gắn với chiến lược gốc; ô còn lại chạy",
         "> MockLLM heuristic để kiểm tra runner, đa phần không đạt expected).",
     ]
+    lines += _hypothesis_section(summaries, meta)
     for cfg_id in cfg_ids:
         failures = summaries[cfg_id]["failures"]
         if not failures:
@@ -251,7 +312,7 @@ def make_charts(exp_dir: Path, summaries: dict[str, dict[str, Any]],
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(3, 3, figsize=(12.5, 9.5), facecolor=_SURFACE)
+    fig, axes = plt.subplots(3, 4, figsize=(16, 9.5), facecolor=_SURFACE)
     fig.suptitle("Thí nghiệm 2×2 — chiến lược × model", fontsize=13,
                  fontweight="bold", color=_INK, x=0.02, ha="left")
     x = range(len(strategies))
@@ -309,9 +370,11 @@ def run_experiment(
     max_case_retries: int = 3,
     backoff_base: float = 20.0,
     charts: bool = True,
+    judge_provider: str | None = None,
 ) -> dict[str, Any]:
     """Chay ma tran strategy x provider, checkpoint tung run, tong hop + bieu do.
 
+    judge_provider: bat LLM-as-judge cho case co field `judge` (xem harness).
     Tra ve dict {"meta", "summaries"}; meta["executed"] = so run thuc chay lan nay
     (0 nghia la moi thu da co trong checkpoint — resume xong tu truoc).
     """
@@ -321,6 +384,11 @@ def run_experiment(
     work = exp_dir / "work"
     work.mkdir(exist_ok=True)
     ckpt = exp_dir / "checkpoint.jsonl"
+    judge_llm = None
+    if judge_provider:
+        from laplace.llm.base import get_provider
+
+        judge_llm = get_provider(judge_provider)
 
     configs = [ExpConfig(strategy=s, provider=p) for p in providers for s in strategies]
     done = _load_checkpoint(ckpt)
@@ -340,7 +408,12 @@ def run_experiment(
                         continue
                     row = _run_case_resilient(
                         prepared, cfg, run_idx, work,
-                        max_retries=max_case_retries, backoff_base=backoff_base)
+                        max_retries=max_case_retries, backoff_base=backoff_base,
+                        judge_llm=judge_llm)
+                    if row.get("error") and RETRYABLE_ERROR.search(row["error"]):
+                        # Het retry ma van loi tam thoi (het quota ngay?): KHONG ghi
+                        # checkpoint de lan resume sau chay lai run nay.
+                        raise QuotaExhausted(row["error"])
                     _append_checkpoint(ckpt, row)
                     done[key] = row
                     executed += 1
@@ -350,6 +423,10 @@ def run_experiment(
     except KeyboardInterrupt:
         partial = True
         print("\nBị ngắt (Ctrl+C) — checkpoint đã lưu, chạy lại cùng --name để tiếp tục.")
+    except QuotaExhausted as e:
+        partial = True
+        print(f"\nLỗi tạm thời kéo dài (hết quota?): {e}\n"
+              "Run dở KHÔNG ghi checkpoint — chạy lại cùng --name khi quota hồi để tiếp tục.")
 
     rows = list(done.values())
     summaries = _summaries(rows, configs)
@@ -361,6 +438,8 @@ def run_experiment(
         "strategies": strategies,
         "providers": providers,
         "models": {p: _provider_model(p) for p in providers},
+        "judge_provider": judge_provider,
+        "judge_model": _provider_model(judge_provider) if judge_provider else None,
         "executed": executed,
         "resumed_from_checkpoint": len(rows) - executed,
         "partial": partial,
@@ -390,6 +469,8 @@ def main() -> None:
     parser.add_argument("--max-case-retries", type=int, default=3)
     parser.add_argument("--backoff-base", type=float, default=20.0)
     parser.add_argument("--no-charts", action="store_true")
+    parser.add_argument("--judge", default=None, choices=["mock", "openai", "gemini"],
+                        help="provider cham LLM-as-judge cho case co field `judge`")
     args = parser.parse_args()
 
     cases = load_cases(args.cases)
@@ -408,9 +489,10 @@ def main() -> None:
     result = run_experiment(
         cases, strategies=strategies, providers=providers, runs=args.runs,
         out_dir=args.out, name=args.name, max_case_retries=args.max_case_retries,
-        backoff_base=args.backoff_base, charts=not args.no_charts)
+        backoff_base=args.backoff_base, charts=not args.no_charts,
+        judge_provider=args.judge)
     print(json.dumps({"meta": result["meta"],
-                      "summaries": {k: {m: v[m] for m in (*METRIC_KEYS, "runs_total")}
+                      "summaries": {k: {m: v.get(m) for m in (*METRIC_KEYS, "runs_total")}
                                     for k, v in result["summaries"].items()}},
                      ensure_ascii=False, indent=2))
 
