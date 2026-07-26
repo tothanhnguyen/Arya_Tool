@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Stats — Laplace's Demon{% endblock %}
+
+{% block head %}
+<style>
+  /* ---------- Style rieng trang /stats ---------- */
+  .charts { max-width: 760px; }
+  .chart-card {
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+    box-shadow: var(--shadow-1); padding: 14px 16px 12px; margin-bottom: 16px;
+  }
+  .chart-card h3 {
+    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); font-weight: 650;
+  }
+  .chart-legend {
+    display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 0 0 8px;
+  }
+  .chart-legend .sw {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 5px; vertical-align: -1px; border: 1px solid var(--line);
+  }
+  .chart-legend .sw.hatch {
+    background: repeating-linear-gradient(45deg, #55554f 0 2px, #ffffff 2px 4px);
+  }
+  svg.chart { display: block; width: 100%; height: auto; }
+  svg.chart text {
+    font-family: var(--mono); font-size: 10.5px; fill: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  svg.chart text.dlabel { font-size: 11px; fill: var(--ink); font-weight: 600; }
+  svg.chart line.grid { stroke: var(--line); stroke-width: 1; }
+  svg.chart line.axis { stroke: var(--faint); stroke-width: 1; }
+  .chart-card details.blk { margin-top: 4px; }
+  .chart-card details.blk table { font-size: 12.5px; margin-top: 8px; }
+  .chart-card details.blk th, .chart-card details.blk td { padding: 6px 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Thống kê</h1>
+  <span class="count">14 ngày gần nhất có dữ liệu</span>
+</div>
+
+{% if empty %}
+<div class="empty">
+  Chưa có dữ liệu thống kê.
+  <div class="hint">Chạy vài task rồi quay lại đây</div>
+</div>
+{% else %}
+
+<div class="totals" style="margin-top:0; margin-bottom:22px;">
+  {% for t in kpis %}
+  <div class="tile"><div class="k">{{ t.k }}</div><div class="v">{{ t.v }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="charts">
+
+  {# ---------------- Token theo ngay ---------------- #}
+  <div class="chart-card">
+    <h3>Token theo ngày</h3>
+    {% set c = token_chart %}
+    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột: token theo ngày">
+      {% for g in c.grid %}
+      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
+      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
+      {% endfor %}
+      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
+      {% for b in c.bars %}
+      <path d="{{ b.path }}" fill="#0b0b0b"><title>{{ b.title }}</title></path>
+      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    <details class="blk">
+      <summary>Bảng dữ liệu</summary>
+      <table><thead><tr><th>Ngày</th><th class="num">Token</th></tr></thead><tbody>
+        {% for day, v in token_table %}<tr><td>{{ day }}</td><td class="num">{{ v }}</td></tr>{% endfor %}
+      </tbody></table>
+    </details>
+  </div>
+
+  {# ---------------- Cost theo ngay (chart RIENG, mot truc y) ---------------- #}
+  <div class="chart-card">
+    <h3>Cost theo ngày (USD)</h3>
+    {% set c = cost_chart %}
+    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột: chi phí USD theo ngày">
+      {% for g in c.grid %}
+      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
+      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
+      {% endfor %}
+      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
+      {% for b in c.bars %}
+      <path d="{{ b.path }}" fill="#55554f"><title>{{ b.title }}</title></path>
+      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    <details class="blk">
+      <summary>Bảng dữ liệu</summary>
+      <table><thead><tr><th>Ngày</th><th class="num">Cost (USD)</th></tr></thead><tbody>
+        {% for day, v in cost_table %}<tr><td>{{ day }}</td><td class="num">{{ v }}</td></tr>{% endfor %}
+      </tbody></table>
+    </details>
+  </div>
+
+  {# ---------------- Task theo ngay: stacked done/failed/khac ---------------- #}
+  <div class="chart-card">
+    <h3>Task theo ngày</h3>
+    <div class="chart-legend">
+      <span><span class="sw" style="background:#0b0b0b"></span>done</span>
+      <span><span class="sw hatch"></span>failed (gạch chéo)</span>
+      <span><span class="sw" style="background:#8a8a85"></span>khác</span>
+    </div>
+    {% set c = task_chart %}
+    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột chồng: task done, failed, khác theo ngày">
+      <defs>
+        <pattern id="hatch-failed" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#55554f"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/>
+        </pattern>
+      </defs>
+      {% for g in c.grid %}
+      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
+      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
+      {% endfor %}
+      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
+      {% for b in c.bars %}
+      {% for s in b.segments %}
+      {% if s.shape == "path" %}
+      <path d="{{ s.d }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></path>
+      {% else %}
+      <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.bw }}" height="{{ s.bh }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></rect>
+      {% endif %}
+      {% endfor %}
+      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    <details class="blk">
+      <summary>Bảng dữ liệu</summary>
+      <table>
+        <thead><tr><th>Ngày</th><th class="num">Done</th><th class="num">Failed</th><th class="num">Khác</th><th class="num">Tổng</th></tr></thead>
+        <tbody>
+          {% for day, done, failed, other, total in task_table %}
+          <tr><td>{{ day }}</td><td class="num">{{ done }}</td><td class="num">{{ failed }}</td><td class="num">{{ other }}</td><td class="num">{{ total }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+  {# ---------------- Top tools ---------------- #}
+  <div class="chart-card">
+    <h3>Top tools</h3>
+    {% if tools_chart.bars %}
+    <div class="chart-legend">
+      <span><span class="sw" style="background:#0b0b0b"></span>gọi ok</span>
+      <span><span class="sw hatch"></span>lỗi (gạch chéo)</span>
+    </div>
+    <svg class="chart" viewBox="0 0 {{ tools_chart.w }} {{ tools_chart.h }}" role="img" aria-label="Biểu đồ cột ngang: số lần gọi từng tool">
+      <defs>
+        <pattern id="hatch-err" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#55554f"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/>
+        </pattern>
+      </defs>
+      {% for b in tools_chart.bars %}
+      <text x="144" y="{{ b.name_y }}" text-anchor="end">{{ b.name }}</text>
+      {% for s in b.segments %}
+      {% if s.shape == "path" %}
+      <path d="{{ s.d }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></path>
+      {% else %}
+      <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.bw }}" height="{{ s.bh }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></rect>
+      {% endif %}
+      {% endfor %}
+      <text x="{{ b.vx }}" y="{{ b.name_y }}">{{ b.value }}</text>
+      {% endfor %}
+    </svg>
+    {% else %}
+    <div class="empty" style="padding:24px 16px;">Chưa có step nào gọi tool.</div>
+    {% endif %}
+    <details class="blk">
+      <summary>Bảng dữ liệu</summary>
+      <table>
+        <thead><tr><th>Tool</th><th class="num">Số lần gọi</th><th class="num">Lỗi</th></tr></thead>
+        <tbody>
+          {% for tool, calls, errors in tools_table %}
+          <tr><td class="tool-name">{{ tool }}</td><td class="num">{{ calls }}</td><td class="num">{{ errors }}</td></tr>
+          {% else %}
+          <tr><td colspan="3" style="color:var(--faint)">Trống</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+</div>
+{% endif %}
+{% endblock %}

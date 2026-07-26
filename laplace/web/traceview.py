@@ -4,7 +4,12 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
@@ -21,6 +26,14 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 router = APIRouter(include_in_schema=False, dependencies=[Depends(require_api_key)])
 
 RUNNING_STATUSES = {"pending", "running"}
+
+# Filter tren trang danh sach: option cung theo gia tri he thong
+FILTER_STATUSES = ("pending", "running", "awaiting_confirm", "done", "failed")
+FILTER_STRATEGIES = ("react", "plan_execute")
+FILTER_ROUTES = ("direct", "single_tool", "multi_step", "clarify")
+LIST_LIMIT_DEFAULT = 50
+LIST_LIMIT_MIN = 10
+LIST_LIMIT_MAX = 500
 
 # Replay: gioi han thoi gian cho giua 2 su kien khi auto-play (giay)
 REPLAY_MIN_DELAY_S = 1.0
@@ -100,9 +113,29 @@ def _system_usage(session) -> dict:
 
 
 @router.get("/", response_class=HTMLResponse)
-def tasks_list(request: Request, cleaned: int | None = None):
+def tasks_list(
+    request: Request,
+    cleaned: int | None = None,
+    q: str = "",
+    status: str = "",
+    strategy: str = "",
+    route: str = "",
+    limit: int = LIST_LIMIT_DEFAULT,
+):
+    limit = max(LIST_LIMIT_MIN, min(limit, LIST_LIMIT_MAX))
+    filtering = bool(q or status or strategy or route)
+    stmt = select(Task)
+    if q:
+        stmt = stmt.where(Task.request.ilike(f"%{q}%"))
+    if status:
+        stmt = stmt.where(Task.status == status)
+    if strategy:
+        stmt = stmt.where(Task.strategy == strategy)
+    if route:
+        stmt = stmt.where(Task.route == route)
+    stmt = stmt.order_by(Task.id.desc()).limit(limit)
     with session_scope() as session:
-        tasks = session.scalars(select(Task).order_by(Task.id.desc()).limit(50)).all()
+        tasks = session.scalars(stmt).all()
         groups: list[dict] = []  # [{label, day_iso, tasks, count, cost_usd}]
         for t in tasks:
             usage = task_usage(session, t.id)
@@ -135,7 +168,17 @@ def tasks_list(request: Request, cleaned: int | None = None):
     return templates.TemplateResponse(
         request,
         "tasks_list.html",
-        {"groups": groups, "grand": grand, "cleaned": cleaned},
+        {
+            "groups": groups,
+            "grand": grand,
+            "cleaned": cleaned,
+            "filters": {"q": q, "status": status, "strategy": strategy, "route": route},
+            "filtering": filtering,
+            "matched": len(tasks),
+            "status_options": FILTER_STATUSES,
+            "strategy_options": FILTER_STRATEGIES,
+            "route_options": FILTER_ROUTES,
+        },
     )
 
 
@@ -164,6 +207,107 @@ def delete_one_task(task_id: int):
     if not n:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
     return RedirectResponse(url="/?cleaned=1", status_code=303)
+
+
+def _load_trace_or_404(task_id: int) -> dict:
+    with session_scope() as session:
+        trace = task_trace(session, task_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail="Task khong ton tai")
+    return trace
+
+
+def _trace_markdown(trace: dict) -> str:
+    """Xuat trace thanh markdown gon: request/status/route, bang steps,
+    bang llm_calls va totals."""
+    task = trace["task"]
+    totals = trace["totals"]
+    lines = [
+        f"# Task #{task['id']}",
+        "",
+        "## Request",
+        "",
+        task["request"],
+        "",
+        "## Status",
+        "",
+        f"- Status: {task['status']}",
+        f"- Strategy: {task['strategy']}",
+        f"- Route: {task['route'] or '-'}",
+        f"- Created: {task['created_at'] or '-'}",
+        f"- Finished: {task['finished_at'] or '-'}",
+    ]
+    if task["result"]:
+        lines += ["", "## Result", "", task["result"]]
+    if task["error"]:
+        lines += ["", "## Error", "", task["error"]]
+
+    lines += ["", "## Steps", ""]
+    if trace["steps"]:
+        lines += [
+            "| # | Tool | Status | Latency (ms) | Retries |",
+            "|---:|---|---|---:|---:|",
+        ]
+        lines += [
+            f"| {s['idx']} | {s['tool']} | {s['status']} "
+            f"| {s['latency_ms']} | {s['retries']} |"
+            for s in trace["steps"]
+        ]
+    else:
+        lines.append("Khong co step nao.")
+
+    lines += ["", "## LLM calls", ""]
+    if trace["llm_calls"]:
+        lines += [
+            (
+                "| Purpose | Provider | Model | Prompt | Completion "
+                "| Cost (USD) | Latency (ms) |"
+            ),
+            "|---|---|---|---:|---:|---:|---:|",
+        ]
+        lines += [
+            f"| {c['purpose']} | {c['provider']} | {c['model']} "
+            f"| {c['prompt_tokens']} | {c['completion_tokens']} "
+            f"| {c['cost_usd']:.6f} | {c['latency_ms']} |"
+            for c in trace["llm_calls"]
+        ]
+    else:
+        lines.append("Khong co LLM call nao.")
+
+    lines += [
+        "",
+        "## Totals",
+        "",
+        f"- Steps: {totals['steps']}",
+        f"- Prompt tokens: {totals['prompt_tokens']}",
+        f"- Completion tokens: {totals['completion_tokens']}",
+        f"- Cost (USD): {totals['cost_usd']:.6f}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+@router.get("/tasks/{task_id}/export.json")
+def export_task_json(task_id: int):
+    """Tai toan bo trace cua task duoi dang file JSON."""
+    trace = _load_trace_or_404(task_id)
+    return JSONResponse(
+        content=trace,
+        headers={
+            "Content-Disposition": f'attachment; filename="task-{task_id}.json"'
+        },
+    )
+
+
+@router.get("/tasks/{task_id}/export.md")
+def export_task_markdown(task_id: int):
+    """Tai trace cua task duoi dang file Markdown gon."""
+    trace = _load_trace_or_404(task_id)
+    return PlainTextResponse(
+        _trace_markdown(trace),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="task-{task_id}.md"'},
+    )
 
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)

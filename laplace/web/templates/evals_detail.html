@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} — Evals — Laplace's Demon{% endblock %}
+{% block head %}
+<style>
+  /* Thanh meter ngang monochrome cho metric dang ti le 0..1 */
+  .meter {
+    display: inline-block; vertical-align: middle;
+    width: 140px; height: 8px; background: var(--wash);
+    border: 1px solid var(--line); border-radius: var(--r-pill); overflow: hidden;
+  }
+  .meter > span { display: block; height: 100%; background: #0b0b0b; }
+  td.metric-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .failed-checks { font-family: var(--mono); font-size: 12px; }
+  .cfg-head { font-family: var(--mono); font-size: 12px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ name }}</h1>
+  {% if kind == 'experiment' %}
+  <span class="badge">experiment</span>
+  {% else %}
+  <span class="badge ghost">run đơn</span>
+  {% endif %}
+  <span class="count">
+    {{ meta.get('timestamp', '—') }}
+    {%- if meta.get('provider') %} · {{ meta.provider }}{% endif -%}
+    {%- if meta.get('providers') %} · {{ meta.providers | join(', ') }}{% endif -%}
+  </span>
+  <span style="margin-left:auto">
+    <a class="btn-ghost" href="{{ raw_url }}" download>Tải raw JSON</a>
+    <a class="btn-ghost" href="/evals">← Danh sách</a>
+  </span>
+</div>
+
+{% if kind == 'run' %}
+<h2>Metric summary</h2>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Metric</th><th class="num">Giá trị</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for m in metrics %}
+        <tr>
+          <td class="metric-name">{{ m.name }}</td>
+          <td class="num">{{ m.display }}</td>
+          <td>
+            {% if m.pct is not none %}
+            <span class="meter" role="img" aria-label="{{ m.display }}">
+              <span style="width: {{ m.pct }}%"></span>
+            </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2>Failures ({{ failures|length }})</h2>
+{% if failures %}
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Case</th><th class="num">Run</th><th>Failed checks</th><th>Error</th></tr>
+      </thead>
+      <tbody>
+        {% for f in failures %}
+        <tr>
+          <td class="metric-name">{{ f.id }}</td>
+          <td class="num">{{ f.run }}</td>
+          <td class="failed-checks">{{ (f.failed_checks or []) | join(', ') }}</td>
+          <td class="failed-checks">{{ f.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty">Không có failure nào — tất cả case đều pass.</div>
+{% endif %}
+
+{% else %}
+<h2>So sánh cấu hình</h2>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          {% for cfg in configs %}<th class="num cfg-head">{{ cfg }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in metric_rows %}
+        <tr>
+          <td class="metric-name">{{ row.name }}</td>
+          {% for cell in row.cells %}
+          <td class="num">
+            {{ cell.display }}
+            {% if cell.pct is not none %}
+            <br><span class="meter" role="img" aria-label="{{ cell.display }}">
+              <span style="width: {{ cell.pct }}%"></span>
+            </span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% for cf in config_failures %}
+<h2>Failures — {{ cf.config }} ({{ cf.failures|length }})</h2>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Case</th><th class="num">Run</th><th>Failed checks</th><th>Error</th></tr>
+      </thead>
+      <tbody>
+        {% for f in cf.failures %}
+        <tr>
+          <td class="metric-name">{{ f.id }}</td>
+          <td class="num">{{ f.run }}</td>
+          <td class="failed-checks">{{ (f.failed_checks or []) | join(', ') }}</td>
+          <td class="failed-checks">{{ f.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<h2>Failures</h2>
+<div class="empty">Không có failure nào — tất cả cấu hình đều pass.</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

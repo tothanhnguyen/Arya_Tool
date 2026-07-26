@@ -1,5 +1,28 @@
 {% extends "base.html" %}
 {% block title %}Tasks — Laplace's Demon{% endblock %}
+{% block head %}
+<style>
+  .filter-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 14px;
+  }
+  .filter-bar input[type="search"],
+  .filter-bar select {
+    font-family: var(--sans); font-size: 13px; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--r-sm); padding: 6px 11px; line-height: 1.5;
+  }
+  .filter-bar input[type="search"] { flex: 1 1 200px; min-width: 150px; }
+  .filter-bar input[type="search"]::placeholder { color: var(--faint); }
+  .filter-bar input[type="search"]:focus,
+  .filter-bar select:focus { border-color: var(--ink); outline: none; }
+  .filter-bar button.btn-ghost { border-radius: var(--r-pill); }
+  .filter-count {
+    color: var(--muted); font-family: var(--mono); font-size: 12.5px;
+    margin-bottom: 12px;
+  }
+</style>
+{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Tasks</h1>
@@ -8,6 +31,33 @@
 
 {% if cleaned is not none %}
 <div class="notice">Đã dọn {{ cleaned }} task (kèm toàn bộ trace).</div>
+{% endif %}
+
+<form method="get" action="/" class="filter-bar">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Tìm trong request…" aria-label="Tìm trong request">
+  <select name="status" aria-label="Lọc theo status">
+    <option value="">Tất cả status</option>
+    {% for s in status_options %}
+    <option value="{{ s }}"{% if filters.status == s %} selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="strategy" aria-label="Lọc theo strategy">
+    <option value="">Tất cả strategy</option>
+    {% for s in strategy_options %}
+    <option value="{{ s }}"{% if filters.strategy == s %} selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="route" aria-label="Lọc theo route">
+    <option value="">Tất cả route</option>
+    {% for s in route_options %}
+    <option value="{{ s }}"{% if filters.route == s %} selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn-ghost">Lọc</button>
+  {% if filtering %}<a class="btn-ghost" href="/">Xóa lọc</a>{% endif %}
+</form>
+{% if filtering %}
+<div class="filter-count">{{ matched }} task khớp</div>
 {% endif %}
 
 {% if groups %}

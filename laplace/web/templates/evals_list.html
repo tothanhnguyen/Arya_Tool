@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Evals — Laplace's Demon{% endblock %}
+{% block head %}
+<style>
+  /* Trang evals: chi vai tinh chinh nho tren nen token chung */
+  .kind { font-size: 10.5px; }
+  td.ts { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Kết quả eval</h1>
+  <span class="count">{{ rows|length }} bộ kết quả</span>
+</div>
+
+{% if rows %}
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Tên</th>
+          <th>Loại</th>
+          <th class="hide-sm">Thời điểm</th>
+          <th class="hide-sm">Provider</th>
+          <th class="num">Cases</th>
+          <th class="num">Runs</th>
+          <th class="num">Kết quả</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="primary">
+            <a href="/evals/{{ r.source }}/{{ r.name }}">{{ r.name }}</a>
+            <span class="sub">{{ r.source }}</span>
+          </td>
+          <td>
+            {% if r.kind == 'experiment' %}
+            <span class="badge kind">experiment</span>
+            {% else %}
+            <span class="badge ghost kind">run đơn</span>
+            {% endif %}
+          </td>
+          <td class="ts hide-sm">{{ r.timestamp }}</td>
+          <td class="hide-sm">{{ r.providers }}</td>
+          <td class="num">{{ r.n_cases }}</td>
+          <td class="num">{{ r.runs }}</td>
+          <td class="num">{{ r.result }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty">
+  Chưa có kết quả eval nào.
+  <div class="hint">chạy eval harness để sinh eval_results/ hoặc evals/results/</div>
+</div>
+{% endif %}
+{% endblock %}
