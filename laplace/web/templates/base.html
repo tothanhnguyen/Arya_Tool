@@ -6,89 +6,235 @@
   <title>{% block title %}Laplace's Demon{% endblock %}</title>
   {% block head %}{% endblock %}
   <style>
+    /* ---------- Design tokens: monochrome minimalism ---------- */
+    :root {
+      --ink: #0b0b0b;
+      --ink-2: #3d3d3a;
+      --muted: #6f6f6a;
+      --faint: #a3a39e;
+      --paper: #ffffff;
+      --bg: #f5f5f2;
+      --wash: #efefec;
+      --line: #e4e4e0;
+      --line-strong: var(--ink);
+      --r-sm: 6px;
+      --r-md: 10px;
+      --r-pill: 999px;
+      --shadow-1: 0 1px 2px rgba(11,11,11,.05);
+      --shadow-2: 0 6px 24px -8px rgba(11,11,11,.12);
+      --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --t: 160ms cubic-bezier(.2,.6,.3,1);
+    }
     * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
-      margin: 0;
-      background: #fafafa;
-      color: #111;
-      font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-      font-size: 14px;
-      line-height: 1.55;
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: var(--sans); font-size: 15px; line-height: 1.6;
+      text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 64px; }
+    a { color: var(--ink); text-underline-offset: 3px; }
+    a:hover { opacity: .75; }
+    a, button, summary, [role="button"] { cursor: pointer; transition: opacity var(--t), background var(--t), color var(--t), border-color var(--t), transform var(--t); }
+    :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+
+    /* ---------- Shell ---------- */
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 88px; }
     header.site {
-      border-bottom: 2px solid #111;
-      padding-bottom: 14px;
-      margin-bottom: 26px;
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px;
+      position: sticky; top: 0; z-index: 50;
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      backdrop-filter: saturate(1.2) blur(10px);
+      -webkit-backdrop-filter: saturate(1.2) blur(10px);
+      border-bottom: 1px solid var(--line);
+      margin: 0 -24px 28px; padding: 14px 24px;
+      display: flex; align-items: center; gap: 14px;
     }
-    header.site h1 { margin: 0; font-size: 19px; letter-spacing: 0.06em; text-transform: uppercase; }
-    header.site h1 a { color: #111; text-decoration: none; }
-    header.site .sub { color: #777; font-size: 12px; }
-    a { color: #111; }
-    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #ddd; }
-    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
-    th {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-      color: #666; border-bottom: 2px solid #111; background: #f4f4f4;
+    .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; }
+    .brand:hover { opacity: 1; }
+    .brand .mark {
+      width: 30px; height: 30px; border-radius: 8px; background: var(--ink);
+      display: grid; place-items: center; flex: none;
+      transition: transform var(--t);
     }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: #f6f6f6; }
-    tfoot td { border-top: 2px solid #111; background: #f4f4f4; font-weight: 700; }
-    .num { text-align: right; white-space: nowrap; }
+    .brand:hover .mark { transform: rotate(45deg); }
+    .brand .mark svg { display: block; }
+    .brand .name { font-weight: 700; font-size: 15.5px; letter-spacing: -.01em; }
+    .brand .tag {
+      font-size: 11px; color: var(--muted); font-family: var(--mono);
+      letter-spacing: .04em; display: block; margin-top: -3px;
+    }
+    header.site .spacer { margin-left: auto; }
+    .navlink {
+      font-size: 13px; font-weight: 600; text-decoration: none;
+      padding: 6px 12px; border-radius: var(--r-pill); border: 1px solid transparent;
+    }
+    .navlink:hover { border-color: var(--line); background: var(--paper); opacity: 1; }
+    .navlink.active { background: var(--ink); color: var(--paper); }
+
+    /* ---------- Page heading ---------- */
+    .page-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 4px 0 18px; }
+    .page-head h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .page-head .count { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+    /* ---------- Badges: shape-coded, khong chi dua vao mau ---------- */
     .badge {
-      display: inline-block; padding: 1px 8px; font-size: 11px;
-      text-transform: uppercase; letter-spacing: 0.05em;
-      border: 1px solid #111; border-radius: 2px; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 2px 10px; font-size: 11px; font-weight: 650;
+      font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em;
+      border: 1.2px solid var(--ink); border-radius: var(--r-pill);
+      white-space: nowrap; background: var(--paper); color: var(--ink); line-height: 1.7;
     }
-    .badge.st-pending { color: #888; border-color: #aaa; background: #fff; }
-    .badge.st-running { color: #111; background: #fff; border-style: dashed; }
-    .badge.st-awaiting_confirm { color: #111; background: #e8e8e8; }
-    .badge.st-done { color: #fff; background: #111; }
-    .badge.st-failed { color: #fff; background: #666; border-color: #666; text-decoration: line-through; }
-    .badge.st-ok { color: #fff; background: #111; }
-    .badge.st-error, .badge.st-rejected { color: #fff; background: #666; border-color: #666; }
-    .badge.st-pending_confirm { color: #111; background: #e8e8e8; }
-    .card { background: #fff; border: 1px solid #ddd; margin-bottom: 14px; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .badge.st-done { background: var(--ink); color: var(--paper); }
+    .badge.st-failed { color: var(--ink-2); border-color: var(--ink-2); border-style: double; border-width: 3px; padding-top: 0; padding-bottom: 0; }
+    .badge.st-failed::before { border-radius: 0; }
+    .badge.st-running { border-style: dashed; }
+    .badge.st-running::before { animation: pulse 1.1s ease-in-out infinite; }
+    .badge.st-pending { color: var(--muted); border-color: var(--faint); }
+    .badge.st-pending::before { background: transparent; border: 1.2px solid currentColor; }
+    .badge.st-awaiting_confirm, .badge.st-pending_confirm { background: var(--wash); }
+    .badge.st-awaiting_confirm::before, .badge.st-pending_confirm::before {
+      background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+      border: 1.2px solid currentColor;
+    }
+    .badge.st-ok { background: var(--ink); color: var(--paper); }
+    .badge.st-error, .badge.st-rejected { color: var(--ink-2); border-color: var(--ink-2); border-style: double; border-width: 3px; padding-top: 0; padding-bottom: 0; }
+    .badge.ghost { border-color: var(--line); color: var(--muted); }
+    .badge.ghost::before { display: none; }
+    @keyframes pulse { 50% { opacity: .25; } }
+
+    /* ---------- Table ---------- */
+    .table-card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-1); overflow: hidden; }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--muted); font-weight: 650; background: var(--paper);
+      border-bottom: 1px solid var(--line-strong); white-space: nowrap;
+    }
+    tbody tr { transition: background var(--t), box-shadow var(--t); }
+    tbody tr:hover { background: var(--wash); box-shadow: inset 3px 0 0 var(--ink); }
+    tr:last-child td { border-bottom: none; }
+    tfoot td { border-top: 1.5px solid var(--line-strong); background: var(--wash); font-weight: 650; font-size: 12.5px; }
+    .num { text-align: right; white-space: nowrap; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+    td.primary a { text-decoration: none; font-weight: 600; display: block; }
+    td.primary .sub { display: block; font-size: 11.5px; color: var(--muted); font-family: var(--mono); margin-top: 1px; }
+
+    /* ---------- Buttons ---------- */
+    .btn-ghost {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 650; text-decoration: none;
+      padding: 5px 12px; border: 1px solid var(--line); border-radius: var(--r-pill);
+      background: var(--paper); white-space: nowrap;
+    }
+    .btn-ghost:hover { border-color: var(--ink); opacity: 1; }
+    .btn-ghost svg { flex: none; }
+
+    /* ---------- Cards / timeline ---------- */
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-1); margin-bottom: 16px; overflow: hidden; }
     .card .card-head {
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-      padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: #f4f4f4;
+      padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--paper);
     }
-    .card .card-body { padding: 10px 12px; }
+    .card .card-body { padding: 14px 16px; }
     .step-idx {
       display: inline-flex; align-items: center; justify-content: center;
-      min-width: 26px; height: 26px; border: 2px solid #111; border-radius: 50%;
-      font-weight: 700; font-size: 12px; background: #fff;
+      min-width: 28px; height: 28px; border-radius: 50%;
+      background: var(--ink); color: var(--paper);
+      font-family: var(--mono); font-weight: 700; font-size: 12px; flex: none;
     }
-    .tool-name { font-weight: 700; }
-    .meta { color: #777; font-size: 12px; margin-left: auto; white-space: nowrap; }
+    .tool-name { font-weight: 700; font-family: var(--mono); font-size: 13.5px; }
+    .meta { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; font-family: var(--mono); }
+    .meta a { color: inherit; }
+
+    .timeline { position: relative; padding-left: 26px; }
+    .timeline::before { content: ""; position: absolute; left: 13px; top: 8px; bottom: 8px; width: 1.5px; background: var(--line); }
+    .timeline .card { position: relative; }
+    .timeline .card::before {
+      content: ""; position: absolute; left: -18.5px; top: 22px;
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--paper); border: 2px solid var(--ink);
+    }
+
+    /* ---------- Content blocks ---------- */
     pre {
-      margin: 6px 0 0; padding: 8px 10px; background: #f7f7f7;
-      border: 1px solid #e5e5e5; overflow-x: auto; font-size: 12px;
-      max-height: 260px; overflow-y: auto;
+      margin: 6px 0 0; padding: 10px 12px; background: var(--bg);
+      border: 1px solid var(--line); border-radius: var(--r-sm);
+      overflow: auto; font-size: 12px; line-height: 1.55; font-family: var(--mono);
+      max-height: 280px;
     }
-    .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; margin-top: 8px; }
-    .label:first-child { margin-top: 0; }
-    h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin: 28px 0 12px; }
-    .totals { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-    .totals .tile { border: 1px solid #111; background: #fff; padding: 8px 14px; min-width: 120px; }
-    .totals .tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; }
-    .totals .tile .v { font-size: 17px; font-weight: 700; }
-    .empty { color: #888; padding: 18px; text-align: center; border: 1px dashed #ccc; background: #fff; }
-    .req-block { background: #fff; border-left: 3px solid #111; padding: 10px 14px; margin-bottom: 16px; white-space: pre-wrap; word-break: break-word; }
-    .result-block { background: #fff; border: 1px solid #111; padding: 10px 14px; white-space: pre-wrap; word-break: break-word; }
-    .error-block { background: #fff; border: 1px dashed #666; color: #666; padding: 10px 14px; white-space: pre-wrap; }
+    details.blk summary {
+      list-style: none; display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--muted); font-weight: 650; margin-top: 10px; user-select: none;
+    }
+    details.blk summary::-webkit-details-marker { display: none; }
+    details.blk summary::before { content: "+"; font-family: var(--mono); font-size: 13px; width: 14px; }
+    details.blk[open] summary::before { content: "−"; }
+    details.blk summary:hover { color: var(--ink); }
+    .label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 650; margin-top: 10px; }
+    .label:first-child, details.blk:first-child summary { margin-top: 0; }
+    h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 34px 0 14px; display: flex; align-items: center; gap: 12px; }
+    h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .req-block {
+      background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--ink);
+      border-radius: var(--r-sm); padding: 12px 16px; white-space: pre-wrap; word-break: break-word;
+    }
+    .result-block { background: var(--paper); border: 1.5px solid var(--ink); border-radius: var(--r-sm); padding: 12px 16px; white-space: pre-wrap; word-break: break-word; }
+    .error-block { background: var(--paper); border: 1.5px dashed var(--ink-2); color: var(--ink-2); border-radius: var(--r-sm); padding: 12px 16px; white-space: pre-wrap; }
+
+    /* ---------- KPI tiles ---------- */
+    .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 18px; }
+    .totals .tile {
+      border: 1px solid var(--line); border-radius: var(--r-md); background: var(--paper);
+      padding: 12px 14px; box-shadow: var(--shadow-1); transition: border-color var(--t), transform var(--t);
+    }
+    .totals .tile:hover { border-color: var(--ink); transform: translateY(-1px); }
+    .totals .tile .k { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 650; }
+    .totals .tile .v { font-size: 20px; font-weight: 700; font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; margin-top: 2px; }
+
+    .empty {
+      color: var(--muted); padding: 44px 20px; text-align: center;
+      border: 1.5px dashed var(--line); border-radius: var(--r-md); background: var(--paper);
+    }
+    .empty .hint { font-size: 12.5px; font-family: var(--mono); margin-top: 6px; color: var(--faint); }
+
+    /* ---------- Responsive & motion & print ---------- */
+    @media (max-width: 760px) {
+      .hide-sm { display: none; }
+      .wrap { padding: 0 14px 64px; }
+      header.site { margin: 0 -14px 20px; padding: 10px 14px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+    @media print {
+      header.site { position: static; backdrop-filter: none; }
+      body { background: #fff; }
+      .btn-ghost, .navlink { display: none; }
+      .card, .table-card, .totals .tile { box-shadow: none; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header class="site">
-      <h1><a href="/">Laplace's Demon</a></h1>
-      <span class="sub">execution trace viewer — read-only</span>
+      <a class="brand" href="/" aria-label="Laplace's Demon — trang chủ">
+        <span class="mark" aria-hidden="true">
+          <!-- con mat quan sat: vong tron + dong tu -->
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6.2" stroke="#fff" stroke-width="1.6"/>
+            <circle cx="8" cy="8" r="2.1" fill="#fff"/>
+          </svg>
+        </span>
+        <span>
+          <span class="name">Laplace's Demon</span>
+          <span class="tag">execution trace · read-only</span>
+        </span>
+      </a>
+      <span class="spacer"></span>
+      <a class="navlink active" href="/">Tasks</a>
     </header>
     {% block content %}{% endblock %}
   </div>

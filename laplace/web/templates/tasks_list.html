@@ -1,48 +1,67 @@
 {% extends "base.html" %}
 {% block title %}Tasks — Laplace's Demon{% endblock %}
 {% block content %}
+<div class="page-head">
+  <h1>Tasks</h1>
+  <span class="count">{{ tasks|length }} gần nhất · {{ grand.llm_calls }} LLM call · ${{ "%.4f"|format(grand.cost_usd) }} toàn hệ thống</span>
+</div>
+
 {% if tasks %}
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Request</th>
-      <th>Status</th>
-      <th>Strategy</th>
-      <th>Route</th>
-      <th class="num">Tokens</th>
-      <th class="num">Cost (USD)</th>
-      <th class="num">Duration</th>
-      <th class="num">Created</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for t in tasks %}
-    <tr>
-      <td><a href="/tasks/{{ t.id }}">{{ t.id }}</a></td>
-      <td><a href="/tasks/{{ t.id }}">{{ t.request }}</a></td>
-      <td><span class="badge st-{{ t.status }}">{{ t.status }}</span></td>
-      <td>{{ t.strategy }}</td>
-      <td>{% if t.route %}<span class="badge">{{ t.route }}</span>{% else %}—{% endif %}</td>
-      <td class="num" title="{{ t.llm_calls }} LLM call">{{ t.total_tokens }}</td>
-      <td class="num">{{ "%.6f"|format(t.cost_usd) }}</td>
-      <td class="num">{% if t.duration_s is not none %}{{ t.duration_s }}s{% else %}—{% endif %}</td>
-      <td class="num">{{ t.created_at }}</td>
-      <td><a href="/tasks/{{ t.id }}/replay">▶ Replay</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-  <tfoot>
-    <tr>
-      <td colspan="5">Tổng toàn hệ thống ({{ grand.llm_calls }} LLM call, mọi task)</td>
-      <td class="num">{{ grand.total_tokens }}</td>
-      <td class="num">{{ "%.6f"|format(grand.cost_usd) }}</td>
-      <td colspan="3"></td>
-    </tr>
-  </tfoot>
-</table>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Request</th>
+          <th>Status</th>
+          <th class="hide-sm">Route</th>
+          <th class="num hide-sm">Tokens</th>
+          <th class="num">Cost (USD)</th>
+          <th class="num hide-sm">Thời lượng</th>
+          <th class="num hide-sm">Tạo lúc</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td class="num">{{ t.id }}</td>
+          <td class="primary">
+            <a href="/tasks/{{ t.id }}">{{ t.request }}
+              <span class="sub">{{ t.strategy }}{% if t.route %} · {{ t.route }}{% endif %}</span>
+            </a>
+          </td>
+          <td><span class="badge st-{{ t.status }}">{{ t.status }}</span></td>
+          <td class="hide-sm">{% if t.route %}<span class="badge ghost">{{ t.route }}</span>{% else %}<span style="color:var(--faint)">—</span>{% endif %}</td>
+          <td class="num hide-sm" title="{{ t.llm_calls }} LLM call">{{ t.total_tokens }}</td>
+          <td class="num">${{ "%.6f"|format(t.cost_usd) }}</td>
+          <td class="num hide-sm">{% if t.duration_s is not none %}{{ t.duration_s }}s{% else %}—{% endif %}</td>
+          <td class="num hide-sm">{{ t.created_at }}</td>
+          <td>
+            <a class="btn-ghost" href="/tasks/{{ t.id }}/replay" aria-label="Replay task {{ t.id }}">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2.5 1.5l8 4.5-8 4.5z"/></svg>
+              Replay
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4">Tổng toàn hệ thống ({{ grand.llm_calls }} LLM call, mọi task)</td>
+          <td class="num hide-sm">{{ grand.total_tokens }}</td>
+          <td class="num">${{ "%.6f"|format(grand.cost_usd) }}</td>
+          <td colspan="3" class="hide-sm"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
 {% else %}
-<div class="empty">Chưa có task nào. Gửi yêu cầu qua Telegram hoặc POST /api/tasks.</div>
+<div class="empty">
+  Chưa có task nào.
+  <div class="hint">Gửi yêu cầu qua Telegram hoặc POST /api/tasks</div>
+</div>
 {% endif %}
 {% endblock %}

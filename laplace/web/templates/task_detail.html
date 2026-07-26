@@ -4,18 +4,22 @@
 {% if auto_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
 {% endblock %}
 {% block content %}
+<div class="page-head">
+  <h1>Task #{{ task.id }}</h1>
+  <span class="badge st-{{ task.status }}">{{ task.status }}</span>
+  <span class="badge ghost">{{ task.strategy }}</span>
+  {% if task.route %}<span class="badge ghost">{{ task.route }}</span>{% endif %}
+  <span class="count" style="margin-left:auto">
+    {{ (task.created_at or "")[:19] | replace("T", " ") }}{% if task.finished_at %} → {{ task.finished_at[11:19] }}{% endif %}
+    {% if auto_refresh %} · auto-refresh 5s{% endif %}
+  </span>
+  <a class="btn-ghost" href="/tasks/{{ task.id }}/replay">
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2.5 1.5l8 4.5-8 4.5z"/></svg>
+    Replay
+  </a>
+</div>
+
 <div class="card">
-  <div class="card-head">
-    <span class="step-idx">{{ task.id }}</span>
-    <span class="badge st-{{ task.status }}">{{ task.status }}</span>
-    <span>{{ task.strategy }}</span>
-    {% if task.route %}<span class="badge">{{ task.route }}</span>{% else %}<span>—</span>{% endif %}
-    <span class="meta">
-      {{ task.created_at or "" }}{% if task.finished_at %} → {{ task.finished_at }}{% endif %}
-      {% if auto_refresh %} · auto-refresh 5s{% endif %}
-      · <a href="/tasks/{{ task.id }}/replay">▶ Replay</a>
-    </span>
-  </div>
   <div class="card-body">
     <div class="label">Request</div>
     <div class="req-block">{{ task.request }}</div>
@@ -30,8 +34,18 @@
   </div>
 </div>
 
-<h2>Timeline ({{ steps|length }} step{{ "s" if steps|length != 1 else "" }})</h2>
+<div class="totals">
+  <div class="tile"><div class="k">Steps</div><div class="v">{{ totals.steps }}</div></div>
+  <div class="tile"><div class="k">LLM calls</div><div class="v">{{ usage.llm_calls }}</div></div>
+  <div class="tile"><div class="k">Prompt tokens</div><div class="v">{{ usage.prompt_tokens }}</div></div>
+  <div class="tile"><div class="k">Completion tokens</div><div class="v">{{ usage.completion_tokens }}</div></div>
+  <div class="tile"><div class="k">Total tokens</div><div class="v">{{ usage.total_tokens }}</div></div>
+  <div class="tile"><div class="k">Total cost (USD)</div><div class="v">{{ "%.6f"|format(usage.cost_usd) }}</div></div>
+</div>
+
+<h2>Timeline · {{ steps|length }} step{{ "s" if steps|length != 1 else "" }}</h2>
 {% if steps %}
+<div class="timeline">
   {% for s in steps %}
   <div class="card">
     <div class="card-head">
@@ -41,55 +55,55 @@
       <span class="meta">{{ s.latency_ms }} ms · retries {{ s.retries }}</span>
     </div>
     <div class="card-body">
-      <div class="label">Params</div>
-      <pre>{{ s.params | tojson(indent=2) }}</pre>
-      <div class="label">Observation</div>
-      <pre>{{ s.observation | tojson(indent=2) }}</pre>
+      <details class="blk" open>
+        <summary>Params</summary>
+        <pre>{{ s.params | tojson(indent=2) }}</pre>
+      </details>
+      <details class="blk" {% if (s.observation | tojson | length) < 600 %}open{% endif %}>
+        <summary>Observation{% if (s.observation | tojson | length) >= 600 %} · {{ s.observation | tojson | length }} ký tự{% endif %}</summary>
+        <pre>{{ s.observation | tojson(indent=2) }}</pre>
+      </details>
     </div>
   </div>
   {% endfor %}
+</div>
 {% else %}
-<div class="empty">Chưa có bước nào được ghi nhận.</div>
+<div class="empty">Chưa có bước nào được ghi nhận.<div class="hint">Task trả lời trực tiếp sẽ không có step</div></div>
 {% endif %}
 
-<h2>LLM calls ({{ llm_calls|length }})</h2>
+<h2>LLM calls · {{ llm_calls|length }}</h2>
 {% if llm_calls %}
-<table>
-  <thead>
-    <tr>
-      <th>Purpose</th>
-      <th>Provider</th>
-      <th>Model</th>
-      <th class="num">Prompt tok</th>
-      <th class="num">Completion tok</th>
-      <th class="num">Cost (USD)</th>
-      <th class="num">Latency</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for c in llm_calls %}
-    <tr>
-      <td>{{ c.purpose }}</td>
-      <td>{{ c.provider }}</td>
-      <td>{{ c.model }}</td>
-      <td class="num">{{ c.prompt_tokens }}</td>
-      <td class="num">{{ c.completion_tokens }}</td>
-      <td class="num">{{ "%.6f"|format(c.cost_usd) }}</td>
-      <td class="num">{{ c.latency_ms }} ms</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Purpose</th>
+          <th class="hide-sm">Provider</th>
+          <th>Model</th>
+          <th class="num">Prompt</th>
+          <th class="num">Completion</th>
+          <th class="num">Cost</th>
+          <th class="num">Latency</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in llm_calls %}
+        <tr>
+          <td><span class="badge ghost">{{ c.purpose }}</span></td>
+          <td class="hide-sm">{{ c.provider }}</td>
+          <td style="font-family:var(--mono);font-size:12.5px">{{ c.model }}</td>
+          <td class="num">{{ c.prompt_tokens }}</td>
+          <td class="num">{{ c.completion_tokens }}</td>
+          <td class="num">${{ "%.6f"|format(c.cost_usd) }}</td>
+          <td class="num">{{ c.latency_ms }} ms</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% else %}
 <div class="empty">Chưa có LLM call nào.</div>
 {% endif %}
-
-<div class="totals">
-  <div class="tile"><div class="k">Steps</div><div class="v">{{ totals.steps }}</div></div>
-  <div class="tile"><div class="k">LLM calls</div><div class="v">{{ usage.llm_calls }}</div></div>
-  <div class="tile"><div class="k">Prompt tokens</div><div class="v">{{ usage.prompt_tokens }}</div></div>
-  <div class="tile"><div class="k">Completion tokens</div><div class="v">{{ usage.completion_tokens }}</div></div>
-  <div class="tile"><div class="k">Total tokens</div><div class="v">{{ usage.total_tokens }}</div></div>
-  <div class="tile"><div class="k">Total cost (USD)</div><div class="v">{{ "%.6f"|format(usage.cost_usd) }}</div></div>
-</div>
 {% endblock %}
