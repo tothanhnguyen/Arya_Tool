@@ -58,10 +58,14 @@ gọi công cụ --- quan sát --- điều chỉnh --- trả lời. Khác với 
 API LLM, hệ thống đặt trọng tâm vào độ tin cậy (giới hạn bước, timeout, xác
 nhận người dùng, trần chi phí mỗi tác vụ), khả năng quan sát (full execution
 trace, trace viewer có chế độ phát lại) và đánh giá định lượng (eval harness
-66 test case thuộc 8 nhóm, 8 metric, tùy chọn LLM-as-judge). Thực nghiệm so
-sánh hai chiến lược điều phối (ReAct, Plan-and-Execute) trên hai cấu hình mô
-hình ngôn ngữ (mock tất định và Gemini) theo ma trận $2 \times 2$ cho thấy
-\todo{dien 1--2 cau ket qua chinh tu evals/results/exp-final}.
+66 test case thuộc 8 nhóm, 8 metric, tùy chọn LLM-as-judge). Thực nghiệm gồm
+phần mock đầy đủ (2 chiến lược ReAct/Plan-and-Execute $\times$ 66 case
+$\times$ 3 lượt, 396 run --- khung agent đạt 100\% ở mọi run trùng chiến
+lược gốc) và mẫu minh họa model thật Gemini $\times$ ReAct (22 case
+$\times$ 3 lượt): success rate 72{,}7\%, route accuracy 94{,}4\%, không
+case prompt injection nào bị vượt, chi phí $\approx$ 0{,}0005 USD/tác vụ;
+điểm yếu nằm ở tác vụ nhiều bước và tự phục hồi lỗi. So sánh chéo model
+đầy đủ nằm ngoài quota hiện có và được xác định là hướng phát triển.
 \end{abstract}
 
 \tableofcontents

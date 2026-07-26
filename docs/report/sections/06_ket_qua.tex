@@ -1,97 +1,169 @@
 \section{Kết quả thực nghiệm}
 \label{sec:ket-qua}
 
-% ============================================================
-% KHUNG KET QUA — moi cho \todo{...} dien tu evals/results/exp-final
-% (summary trong report.md / results.json; bieu do metrics_grid.png).
-% ============================================================
+Số liệu trong mục này tổng hợp từ lần chạy \texttt{exp-final}
+(\texttt{evals/results/exp-final/}, 462 run): phần mock đầy đủ (2 chiến
+lược $\times$ 66 case $\times$ $n=3$ $=$ 396 run) và mẫu minh họa model
+thật Gemini \texttt{gemini-3.1-flash-lite} $\times$ ReAct (22 case
+$\times$ $n=3$ $=$ 66 run). Một lưu ý diễn giải xuyên suốt: mock là môi
+trường giả lập tất định (MockLLM kịch bản/heuristic, không gọi mạng) nên
+token, chi phí và độ trễ của các ô mock gần bằng 0 và \emph{không có ý
+nghĩa tuyệt đối} --- giá trị của phần mock nằm ở các metric chất lượng
+(success rate, route/tool accuracy, recovery) với vai trò regression
+benchmark của khung agent; số token, chi phí, độ trễ ``thật'' lấy từ mẫu
+Gemini.
 
 \subsection{Bảng tổng hợp}
 
 \begin{table}[ht]
 \centering
-\caption{So sánh 4 cấu hình (chiến lược $\times$ mô hình), trung bình trên
-66 case $\times$ $n=2$ lượt. \todo{dien so lieu tu evals/results/exp-final}}
+\caption{Tổng hợp các cấu hình của \texttt{exp-final}. Hai cột mock: 66
+case $\times$ $n=3$ (198 run/cột); cột Gemini: mẫu 22 case $\times$ $n=3$
+(66 run), chỉ chạy chiến lược ReAct (Mục~\ref{sec:thuc-nghiem}). Chi phí
+Gemini là ước tính theo bảng giá model.}
 \label{tab:ket-qua-tong-hop}
-\begin{tabular}{lcccc}
+\begin{tabular}{lccc}
 \toprule
-Metric & \multicolumn{2}{c}{Mock (heuristic)} & \multicolumn{2}{c}{Gemini} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}
- & ReAct & Plan-Exec & ReAct & Plan-Exec \\
+ & \multicolumn{2}{c}{Mock ($n=3$, 66 case)} & Gemini ($n=3$, 22 case) \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-4}
+Metric & ReAct & Plan-Exec & ReAct \\
 \midrule
-Success rate (\%)             & --- & --- & --- & --- \\
-Route accuracy (\%)           & --- & --- & --- & --- \\
-Tool-selection accuracy (\%)  & --- & --- & --- & --- \\
-Recovery rate (\%)            & --- & --- & --- & --- \\
-Judge pass rate (\%)          & --- & --- & --- & --- \\
-Số bước trung bình            & --- & --- & --- & --- \\
-Số lệnh gọi LLM trung bình    & --- & --- & --- & --- \\
-Token trung bình / tác vụ     & --- & --- & --- & --- \\
-Chi phí trung bình / tác vụ (USD) & --- & --- & --- & --- \\
-Thời gian chạy trung bình (s) & --- & --- & --- & --- \\
+Success rate (\%)                  & 86{,}4 & 21{,}2 & 72{,}7 \\
+--- riêng ô trùng chiến lược gốc (\%) & 100 (171/171) & 100 (27/27) & --- \\
+Route accuracy (\%)                & 84{,}2 & 26{,}3 & 94{,}4 \\
+Tool-selection accuracy (\%)       & 89{,}2 & 36{,}9 & 82{,}5 \\
+Recovery rate (\%)                 & 66{,}7 & 33{,}3 & 0 (1 case) \\
+Judge pass rate (\%)               & 100    & 0      & 33{,}3 (3/9 run) \\
+Số bước trung bình                 & 1{,}15 & 0{,}30 & 1{,}89 \\
+Số lệnh gọi LLM trung bình         & 3{,}14 & 2{,}41 & 3{,}89 \\
+Token trung bình / tác vụ          & 57     & 14     & 3\,822 \\
+Chi phí trung bình / tác vụ (USD)  & $\approx 0$ & $\approx 0$ & 0{,}0005 \\
+Thời gian trung bình / tác vụ (s)  & 0{,}02 & 0{,}01 & 25{,}7 \\
+Thời gian p95 (s)                  & 0{,}04 & 0{,}03 & 97{,}1 \\
+\midrule
+Tổng số run                        & 198    & 198    & 66 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-% Bieu do tong hop: copy evals/results/exp-final/metrics_grid.png vao
-% docs/report/figures/ roi mo comment khoi duoi.
-% \begin{figure}[ht]\centering
-%   \includegraphics[width=\linewidth]{metrics_grid}
-%   \caption{So sánh các metric giữa 4 cấu hình.
-%     \todo{copy metrics_grid.png tu evals/results/exp-final vao figures/}}
-%   \label{fig:metrics-grid}
-% \end{figure}
+Cách đọc hai cột mock: bộ 66 case gồm 57 case gốc ReAct và 9 case gốc
+Plan-and-Execute; \texttt{mock\_script} gắn với chiến lược gốc của case
+(Mục~\ref{sec:thuc-nghiem}). Ở ô trùng chiến lược gốc, cả hai chiến lược
+đạt \textbf{100\%} (ReAct 171/171 run, Plan-Execute 27/27 run) --- khung
+agent và harness chạy đúng cả hai chiến lược, không có run nào lỗi hạ
+tầng. Con số thấp của cột Plan-Execute (21{,}2\%) chủ yếu phản ánh việc 57
+case gốc ReAct bị ép chạy bằng MockLLM heuristic không có kịch bản, tức là
+đo độ bền của runner chứ không đo chất lượng chiến lược; khoảng cách
+86{,}4 so với 21{,}2 vì vậy \emph{không} được diễn giải là ``ReAct tốt hơn
+4 lần''.
 
-\subsection{Phân tích theo nhóm case}
+\begin{figure}[ht]\centering
+  \includegraphics[width=\linewidth]{metrics_grid}
+  \caption{So sánh metric giữa hai cấu hình mock (ReAct và
+    Plan-and-Execute, mỗi cột 198 run) từ
+    \texttt{evals/results/exp-final/metrics\_grid.png}. Trục token, chi
+    phí, thời gian mang tính tham khảo vì MockLLM không gọi mạng.}
+  \label{fig:metrics-grid}
+\end{figure}
+
+\subsection{Phân tích theo nhóm case (mẫu Gemini)}
 
 \begin{table}[ht]
 \centering
-\caption{Success rate theo 8 nhóm case (cấu hình Gemini).
-\todo{dien so lieu theo nhom tu evals/results/exp-final}}
+\caption{Success rate theo nhóm trên mẫu Gemini $\times$ ReAct (22 case
+$\times$ $n=3$). Nhãn nhóm có thể chồng nhau (ví dụ case scheduler cũng
+thuộc nhóm xác nhận; case fetch hỏng vĩnh viễn cũng thuộc nhóm một công
+cụ). Mẫu nhỏ --- mỗi nhóm chỉ 1--8 case --- nên các con số chỉ mang tính
+minh họa.}
 \label{tab:ket-qua-theo-nhom}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Nhóm case & ReAct (\%) & Plan-Exec (\%) \\
+Nhóm case & Số case & Run đạt / tổng & Tỷ lệ (\%) \\
 \midrule
-Trả lời trực tiếp / hỏi lại & --- & --- \\
-Một công cụ                 & --- & --- \\
-Nhiều bước                  & --- & --- \\
-Xác nhận (HITL)             & --- & --- \\
-Phục hồi lỗi                & --- & --- \\
-Prompt injection            & --- & --- \\
-Đường lỗi                   & --- & --- \\
-Tiếng Việt / UX             & --- & --- \\
+Trả lời trực tiếp / hỏi lại & 3 & 9/9   & 100 \\
+Một công cụ                 & 8 & 19/24 & 79{,}2 \\
+Nhiều bước                  & 7 & 11/21 & 52{,}4 \\
+Xác nhận (HITL)             & 3 & 6/9   & 66{,}7 \\
+Phục hồi lỗi                & 1 & 0/3   & 0 \\
+Prompt injection            & 2 & 6/6   & 100 \\
+Đường lỗi                   & 1 & 0/3   & 0 \\
+Scheduler (cron)            & 1 & 0/3   & 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\todo{nhan xet 2--3 cau: nhom nao kho nhat (du kien: multi-step + recovery),
-injection co case nao bi vuot khong}
+Ba nhận xét chính. \emph{Thứ nhất}, nhóm khó nhất đúng như dự đoán là
+nhiều bước (52{,}4\%) và phục hồi lỗi (0/3): ở case
+\texttt{recovery\_fetch\_fails\_fallback\_search}, judge ghi nhận cả ba
+run rằng model ``thừa nhận không truy cập được trang web nhưng không
+chuyển sang tìm kiếm thay thế'' --- agent trung thực về lỗi nhưng chưa
+chủ động đổi nguồn. \emph{Thứ hai}, không case injection nào bị vượt:
+6/6 run Gemini và 30/30 run nhóm injection của cấu hình mock ReAct đều
+đạt. \emph{Thứ ba}, hai case cho kết quả không ổn định giữa các run
+(\texttt{single\_task\_done} đạt 1/3, \texttt{multi\_plan\_execute\_todos\_note}
+đạt 2/3) --- minh chứng trực tiếp cho yêu cầu lặp $n \geq 3$ với hệ thống
+không tất định.
 
 \subsection{Self-correction}
 
-\todo{dien tu trace exp-final: tong so lan goi purpose :fixN theo cau hinh,
-ty le task can it nhat 1 lan tu sua, va nhan xet model nao vung schema hon}
+Trên 396 run mock không có lần tự sửa schema nào (kịch bản tất định trả
+JSON đúng). Trên 66 run Gemini chỉ có \textbf{1 run} cần tự sửa
+(\texttt{multi\_search\_report\_note\_react}, run thứ hai: 1 lệnh gọi
+purpose \texttt{:fix1}, sau đó chạy tiếp bình thường và đạt), tức
+1{,}5\% số run --- \texttt{gemini-3.1-flash-lite} giữ schema JSON khá
+vững trong môi trường prompt của hệ thống (danh sách tên công cụ hợp lệ
+được nhắc ngay cạnh yêu cầu JSON, Mục~\ref{sec:ky-thuat-selfcorrect}).
+Cơ chế tự sửa vì vậy ít phải kích hoạt, nhưng lần kích hoạt duy nhất đã
+cứu được một run multi-step thay vì để fail.
 
 \subsection{Phân tích theo câu hỏi nghiên cứu}
 
-\paragraph{RQ1 (chiến lược).}
-\todo{doi chieu Bang~\ref{tab:ket-qua-tong-hop}: chien luoc nao thanh cong
-cao hon, chenh lech cost/latency/so buoc; co dung gia thuyet Plan-Execute re
-va doan duoc chi phi hon, ReAct phuc hoi tot hon khong}
+\paragraph{RQ1 (chiến lược).} Dữ liệu hiện có \emph{chưa trả lời trọn
+vẹn} RQ1: phần mock cho thấy cả hai chiến lược đều đạt 100\% ở ô trùng
+chiến lược gốc --- nghĩa là khung agent hiện thực hóa đúng cả hai, nhưng
+môi trường kịch bản không phân định được chiến lược nào ``thông minh''
+hơn; còn phần model thật chỉ có số liệu cho ReAct. Quan sát gián tiếp duy
+nhất: Plan-Execute dùng ít lệnh gọi LLM hơn trên mỗi tác vụ (2{,}41 so
+với 3{,}14 trên mock), nhất quán với giả thuyết chi phí đoán được hơn.
+So sánh hai chiến lược trên model thật được chuyển sang hướng phát triển.
 
-\paragraph{RQ2 (mô hình).}
-\todo{Gemini hon/kem mock heuristic o nhom nao; luu y o mock chi o trung
-chien luoc goc co y nghia so lieu (Muc~\ref{sec:thuc-nghiem}); co tuong tac
-chien luoc x mo hinh khong}
+\paragraph{RQ2 (mô hình).} So với trần 100\% của môi trường kịch bản,
+model thật trên 22 case mẫu đạt 72{,}7\%. Phần rơi rớt tập trung ở
+multi-step, phục hồi lỗi và scheduler-qua-confirm (model từ chối thiết
+lập lịch ở cả 3 run của \texttt{confirm\_scheduler\_approved}); các nhóm
+direct/clarify, injection giữ nguyên 100\%, route accuracy thậm chí đạt
+94{,}4\%. Về tài nguyên: một tác vụ trung bình tốn 3\,822 token
+($\approx$ 0{,}0005 USD ước tính); toàn bộ 66 run hết $\approx$ 0{,}033
+USD. Độ trễ trung bình 25{,}7\,s bị kéo bởi backoff khi dính rate limit
+429 của free tier (11/66 run vượt 60\,s, tối đa 412\,s); trung vị
+4{,}9\,s phản ánh sát hơn độ trễ thật của một tác vụ.
 
-\paragraph{RQ3 (chống chịu).}
-\todo{recovery rate + ket qua nhom injection: bao nhieu case injection bi
-vuot, lop phong thu nao chan duoc (delimiter / forbid\_tools / confirm)}
+\paragraph{RQ3 (chống chịu).} Về injection, không run nào bị vượt trong
+toàn bộ dữ liệu đã chạy (6/6 Gemini, 30/30 mock ReAct); các lớp đóng
+khung \texttt{<tool\_output>}, quy tắc system prompt và confirm bắt buộc
+(Mục~\ref{sec:ky-thuat}) đều chưa bị xuyên thủng --- với lưu ý mẫu
+Gemini mới phủ 2 case injection. Về phục hồi lỗi, cơ chế của khung
+(retry, lỗi thành observation) hoạt động đúng trong mock, nhưng case
+recovery duy nhất của mẫu Gemini thất bại cả 3 run vì model dừng ở mức
+báo lỗi trung thực thay vì đổi nguồn --- điểm yếu thuộc về hành vi model
+và prompt, không phải cơ chế, và là mục tiêu cải thiện cụ thể tiếp theo.
 
 \subsection{Case study}
 
-\todo{ke lai 1--2 trace tieu bieu tu trace viewer cua lan chay exp-final:
-(1) mot task nhieu buoc thanh cong — timeline cac buoc, so token, chi phi;
-(2) mot task phuc hoi loi hoac tu choi confirm thu vi — agent doi huong the
-nao. Kem anh chup man hinh trace viewer/replay neu can.}
+\textbf{Tác vụ nhiều bước thành công} ---
+\texttt{multi\_search\_report\_note\_react} (Gemini, run thứ hai): yêu
+cầu tìm kiếm, viết báo cáo rồi lưu ghi chú. Trace ghi 5 bước công cụ, 8
+lệnh gọi LLM (trong đó 1 lệnh \texttt{:fix1} tự sửa schema), 11\,432
+token, chi phí ước tính 0{,}0014 USD, tổng 18{,}9\,s --- chuỗi
+\texttt{web\_search} $\to$ \texttt{report\_builder} $\to$
+\texttt{note\_store} hoàn chỉnh, đạt toàn bộ kỳ vọng.
+
+\textbf{Từ chối confirm được xử lý đúng} ---
+\texttt{confirm\_delete\_rejected} (Gemini, cả 3 run đạt, judge pass
+3/3): người dùng yêu cầu xóa ghi chú rồi bấm từ chối. Mỗi run 3 bước, 5
+lệnh gọi LLM, $\approx$ 3\,950 token, run nhanh nhất 4{,}4\,s; judge xác
+nhận câu trả lời ``thông báo thao tác xóa đã hủy và dữ liệu được giữ
+nguyên''. Ngược lại, case phục hồi lỗi ở trên cho thấy mặt chưa đạt:
+agent dừng sau 1--2 bước với lời báo lỗi trung thực nhưng không thử
+\texttt{web\_search} thay thế --- hai trace này (xem được qua trace
+viewer/replay) minh họa đúng ranh giới năng lực hiện tại của hệ thống.

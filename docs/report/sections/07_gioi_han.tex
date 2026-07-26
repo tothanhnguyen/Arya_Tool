@@ -27,12 +27,22 @@
         đang chạy (giới hạn Python) --- thread cũ được bỏ lại có kiểm soát.
   \item \textbf{Đánh giá}: LLM-as-judge mới chấm pass/fail theo tiêu chí từng
         case, chưa có thang điểm nhiều mức và chưa kiểm chứng chéo tay trên
-        mẫu lớn; bộ 66 case chưa phủ hết không gian hành vi; số lượt lặp
-        $n=2$/cấu hình (do quota free tier) là nhỏ so với mức $n \geq 3$
-        mong muốn cho hệ thống không tất định, nên khác biệt nhỏ giữa các cấu
-        hình cần diễn giải thận trọng.
-        \todo{bo sung gioi han rut ra tu so lieu exp-final: variance giua
-        cac run, nhom case yeu nhat}
+        mẫu lớn; trong lần chạy mẫu, judge còn dùng chính model agent
+        (\texttt{gemini-3.1-flash-lite}) nên có rủi ro self-preference.
+        Bộ 66 case chưa phủ hết không gian hành vi.
+  \item \textbf{Phần model thật chỉ là mẫu minh họa}: quota free tier Gemini
+        (500 request/ngày) cạn giữa chừng nên thay vì đủ ma trận
+        $2 \times 2$, chỉ đo được một cấu hình ReAct $\times$ Gemini trên
+        22/66 case ($n=3$, 66 run) --- chưa đủ để so sánh chéo model hay so
+        sánh hai chiến lược trên model thật (RQ1, RQ2 mới trả lời một
+        phần, Mục~\ref{sec:ket-qua}); việc đo model khác sẽ thực hiện trong
+        tương lai. Số liệu exp-final cũng chỉ ra hai điểm cần thận trọng:
+        (1) kết quả model thật dao động giữa các run (2/22 case đổi
+        pass/fail giữa 3 lượt) nên khác biệt nhỏ giữa cấu hình chưa có ý
+        nghĩa; (2) nhóm yếu nhất trên model thật là multi-step
+        (52{,}4\%) và phục hồi lỗi (0/3 --- model báo lỗi trung thực nhưng
+        không tự đổi nguồn); độ trễ đo được còn bị méo bởi backoff 429 của
+        free tier (trung bình 25{,}7\,s so với trung vị 4{,}9\,s).
 \end{itemize}
 
 \subsection{Hướng phát triển}
@@ -47,9 +57,11 @@
         vụ.
   \item Chuẩn hóa tool interface theo hướng Model Context Protocol (MCP) để
         dùng lại hệ sinh thái công cụ bên ngoài.
-  \item Mở rộng eval: thêm case đối kháng, tăng số lượt lặp, thang điểm judge
-        nhiều mức có kiểm chứng người, đo chi phí--chất lượng theo Pareto để
-        chọn model.
+  \item Mở rộng eval: chạy đủ ma trận 2 chiến lược $\times$ nhiều model thật
+        (khi có quota hoặc model khác) để trả lời trọn RQ1--RQ2; thêm case
+        đối kháng, tăng số lượt lặp, thang điểm judge nhiều mức có kiểm
+        chứng người (judge tách model với agent), đo chi phí--chất lượng
+        theo Pareto để chọn model.
 \end{itemize}
 
 \section*{Kết luận}
@@ -63,9 +75,15 @@ xác nhận người dùng bền vững qua restart, trần chi phí, rate limit
 prompt injection nhiều lớp), khả năng quan sát (mọi lệnh gọi LLM và mọi lần
 chạy công cụ đều có trace; trace viewer kèm chi phí và chế độ phát lại
 offline), và đánh giá định lượng (eval harness 66 case, 8 metric, chạy đúng
-agent loop production, tùy chọn LLM-as-judge). Thí nghiệm ma trận
-$2 \times 2$ cho thấy \todo{1--2 cau ket qua chinh + cau hinh mac dinh duoc
-chon, dien tu evals/results/exp-final}.
+agent loop production, tùy chọn LLM-as-judge). Thực nghiệm
+\texttt{exp-final} cho thấy khung agent đạt 100\% trên toàn bộ 198 run
+mock trùng chiến lược gốc ở cả hai chiến lược (vai trò regression
+benchmark), và trên mẫu model thật Gemini $\times$ ReAct (22 case,
+$n=3$) đạt 72{,}7\% success với chi phí $\approx$ 0{,}0005 USD/tác vụ ---
+mạnh ở phân tuyến (route accuracy 94{,}4\%), trả lời trực tiếp và chống
+injection (không run nào bị vượt), yếu ở multi-step và tự phục hồi lỗi;
+ReAct được giữ làm chiến lược mặc định vì là cấu hình duy nhất đã có số
+liệu model thật và xử lý mềm hơn khi người dùng từ chối confirm.
 
 Bài học lớn nhất của đồ án nằm ở phương pháp: khi trace là công dân hạng
 nhất và bộ eval lặp lại được, mọi thay đổi --- từ sửa prompt đến đổi chiến

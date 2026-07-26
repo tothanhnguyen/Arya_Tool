@@ -67,7 +67,7 @@ Vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi 
 **3 đóng góp chính:**
 1. Agent loop **tự xây dạng state machine** (~500 dòng, không framework) có trace đầy đủ
 2. **Trace viewer** web + chế độ replay offline
-3. **Eval harness** 66 case + thí nghiệm so sánh 2 chiến lược × 2 model
+3. **Eval harness** 66 case + thực nghiệm 2 chiến lược (396 run mock) + mẫu model thật Gemini
 
 ---
 
@@ -202,54 +202,55 @@ Theo kịch bản `docs/demo/KICH_BAN_DEMO.md` — 4 use case tăng dần độ 
 - **Bộ case:** 66 case YAML (8 nhóm: direct/clarify, 1 tool, nhiều bước, confirm + reject, lỗi tool & phục hồi, injection, scheduler/cron, tiếng Việt UX) — chạy qua **đúng agent loop production**, mỗi run một DB sạch
 - **Chấm:** rule-based theo kỳ vọng khai báo (status, route, tập tool, tool cấm, chuỗi trong câu trả lời) + **LLM-as-judge** tùy chọn cho chất lượng câu trả lời (model chấm tách khỏi model agent)
 - **9 metric:** success rate, route accuracy, tool-selection accuracy, recovery rate, số bước TB, số lệnh LLM TB, tokens TB, cost TB, thời gian TB (+ p95, retries)
-- **Thí nghiệm ma trận 2×2:** {ReAct, Plan-Execute} × {mock, Gemini}, **n=2 run/cấu hình** (LLM không tất định), checkpoint/resume + chịu rate limit
-- Toàn bộ chạy 1 lệnh: `python -m laplace.evals.experiment` · nền tảng: **164 test pytest offline**
+- **Thực nghiệm `exp-final` (462 run):** phần **mock đầy đủ** — 2 chiến lược {ReAct, Plan-Execute} × 66 case × **n=3** = 396 run; phần **model thật** — mẫu minh họa Gemini (`gemini-3.1-flash-lite`) × ReAct trên **22 case × n=3** = 66 run *(free tier 500 req/ngày cạn quota — so sánh model đầy đủ là future work)*
+- Checkpoint/resume + chịu rate limit; toàn bộ chạy 1 lệnh: `python -m laplace.evals.experiment` · nền tảng: **164 test pytest offline**
 
 ---
 
-## 10. Kết quả — so sánh hai chiến lược
+## 10. Kết quả — hai chiến lược trên môi trường mock (n=3, 396 run)
 
-| Metric | ReAct × Gemini | Plan-Execute × Gemini |
+| Metric | ReAct × mock | Plan-Execute × mock |
 |---|---|---|
-| Success rate | <span class="placeholder">[SỐ LIỆU: điền từ evals/results/exp-final]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Route accuracy | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Tool-selection accuracy | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Recovery rate | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Số bước TB / task | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
+| Success rate | **86,4%** (171/198) | 21,2% (42/198) |
+| — riêng ô trùng chiến lược gốc | **100%** (171/171) | **100%** (27/27) |
+| Route accuracy | 84,2% | 26,3% |
+| Tool-selection accuracy | 89,2% | 36,9% |
+| Số bước TB / task | 1,15 | 0,30 |
+| Số lệnh gọi LLM TB / task | 3,14 | 2,41 |
 
-> Nhận xét chính: <span class="placeholder">[SỐ LIỆU: 1–2 câu — chiến lược nào thắng ở đâu, chênh bao nhiêu điểm; đối chiếu giả thuyết "Plan-Execute rẻ hơn cho task tuyến tính, ReAct phục hồi lỗi tốt hơn"]</span>
-
-*(Tham chiếu mock matrix: ReAct đạt success 0.865 trên 37 case nền — số cuối lấy từ `exp-final`.)*
-
----
-
-## 11. Kết quả — chi phí, độ trễ & judge
-
-| Metric | ReAct × Gemini | Plan-Execute × Gemini |
-|---|---|---|
-| Lệnh gọi LLM TB / task | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Tokens TB / task | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Cost TB / task (USD) | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Thời gian TB / p95 (s) | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-| Judge pass rate | <span class="placeholder">[SỐ LIỆU]</span> | <span class="placeholder">[SỐ LIỆU]</span> |
-
-![w:640 center](placeholder-metrics-grid.png)
-
-<span class="placeholder">[HÌNH: chèn `evals/results/exp-final/metrics_grid.png` khi export]</span>
+> **Cách đọc:** mock_script gắn với chiến lược gốc của case (57/66 case gốc ReAct, 9 gốc Plan-Execute). Ô trùng chiến lược gốc đạt **100% cả hai phía** → khung agent chạy đúng cả 2 chiến lược; khoảng cách 86,4 vs 21,2 phản ánh cơ cấu bộ case, **không** phải "ReAct tốt hơn 4 lần". So sánh 2 chiến lược trên model thật → future work (quota).
 
 ---
 
-## 12. Kết quả — phân tích theo nhóm case
+## 11. Kết quả — model thật: mẫu Gemini × ReAct (22 case × n=3 = 66 run)
+
+| Metric | Gemini (`gemini-3.1-flash-lite`) × ReAct |
+|---|---|
+| **Success rate** | **72,7%** (48/66) — so với trần 100% của mock kịch bản |
+| Route accuracy / Tool-selection | **94,4%** / 82,5% |
+| Tokens TB / task | 3.822 (prompt 3.421 + completion 401) |
+| Cost TB / task (ước tính) | **$0,0005** — cả 66 run hết ~$0,033 |
+| Thời gian: trung vị / TB / p95 (s) | **4,9** / 25,7 / 97,1 — TB bị kéo bởi backoff 429 free tier (11/66 run >60s) |
+| Judge pass rate | 33,3% (3/9 run có tiêu chí judge) |
+| Self-correction | 1/66 run cần 1 lần `:fix1` (schema JSON khá vững) |
+
+> Mẫu minh họa hành vi model thật — **không đủ** so sánh chéo model. Biểu đồ mock đầy đủ:
+
+![w:540 center](metrics_grid.png)
+
+---
+
+## 12. Kết quả — phân tích theo nhóm case (mẫu Gemini × ReAct)
 
 | Nhóm case | Nhận xét |
 |---|---|
-| Nhóm mạnh nhất | <span class="placeholder">[SỐ LIỆU: nhóm + tỷ lệ pass]</span> |
-| Nhóm yếu nhất | <span class="placeholder">[SỐ LIỆU: nhóm + tỷ lệ pass + vì sao]</span> |
-| Injection | <span class="placeholder">[SỐ LIỆU: bao nhiêu case đứng vững / thủng ở đâu]</span> |
-| Recovery (lỗi tool) | <span class="placeholder">[SỐ LIỆU: recovery rate + ví dụ 1 trace]</span> |
-| Self-correction | <span class="placeholder">[SỐ LIỆU: tỷ lệ call phải fix1/fix2 theo model]</span> |
+| Nhóm mạnh nhất | Direct/clarify **9/9** và injection **6/6** (100%); một công cụ 19/24 (79,2%) |
+| Nhóm yếu nhất | Nhiều bước **11/21 (52,4%)**; recovery & error-path & scheduler đều 0/3 trên case mẫu |
+| Injection | **Không run nào bị vượt**: 6/6 Gemini + 30/30 mock ReAct — delimiter `<tool_output>` + confirm giữ vững |
+| Recovery (lỗi tool) | 0/3 ở case fetch hỏng: judge ghi rõ *"thừa nhận không truy cập được nhưng không đổi sang tìm kiếm"* — model trung thực nhưng chưa chủ động đổi nguồn |
+| Self-correction | Mock: 0 lần; Gemini: 1/66 run (1,5%) cần 1 lần `:fix1` — cứu được 1 run multi-step |
 
-**Kết luận cấu hình mặc định:** <span class="placeholder">[SỐ LIỆU: chọn chiến lược × model nào làm mặc định, vì sao — 1 câu]</span>
+**Kết luận cấu hình mặc định:** giữ **ReAct × Gemini** — cấu hình duy nhất đã có số liệu model thật (72,7% trên mẫu), route accuracy cao (94,4%) và xử lý mềm khi người dùng từ chối confirm.
 
 *Bài học định tính đã thấy từ eval: model nhỏ hay bịa tên tool (`google_search`) → prompt nhắc danh sách tên hợp lệ ngay cạnh yêu cầu JSON, lỗi giảm hẳn.*
 
@@ -277,7 +278,7 @@ Theo kịch bản `docs/demo/KICH_BAN_DEMO.md` — 4 use case tăng dần độ 
 ## Kết luận
 
 **Một hệ thống chạy thật** — bot Telegram, 6 tool, confirm HITL, scheduler, trace viewer
-**Một thực nghiệm có số liệu** — 66 case × 9 metric × ma trận 2×2, lặp n=2
+**Một thực nghiệm có số liệu** — 462 run: 396 run mock (2 chiến lược, n=3) + 66 run model thật (Gemini × ReAct, 72,7%)
 **Một triết lý xuyên suốt** — vòng lặp tường minh · mọi thứ có trace · quyết định bằng số liệu
 
 &nbsp;
@@ -295,8 +296,8 @@ Theo kịch bản `docs/demo/KICH_BAN_DEMO.md` — 4 use case tăng dần độ 
 **Vì sao tự xây agent loop mà không dùng LangChain/LangGraph?**
 Mục tiêu học thuật là hiểu và bảo vệ được từng chuyển trạng thái. Lõi ~500 dòng state machine tường minh — debug, test, giải thích được từng bước. Framework che mất vòng lặp, khó trace theo ý mình. Trade-off chấp nhận: tự viết lại một số thứ framework có sẵn.
 
-**Thí nghiệm 2×2 kiểm soát biến thế nào?**
-Đóng băng bộ case + prompt trước khi chạy; cùng 66 case cho cả 4 cấu hình; lặp nhiều run vì LLM không tất định; mỗi run DB sạch; runner có checkpoint/resume và chịu rate limit nên số liệu không méo bởi lỗi giữa chừng.
+**Thí nghiệm kiểm soát biến thế nào?**
+Đóng băng bộ case + prompt trước khi chạy; cùng bộ case cho các cấu hình; lặp n=3 vì LLM không tất định; mỗi run DB sạch; runner có checkpoint/resume và chịu rate limit nên số liệu không méo bởi lỗi giữa chừng. Phần Gemini bị quota free tier cắt còn mẫu 22 case × ReAct — ghi trung thực thành giới hạn, không gộp vào so sánh chiến lược.
 
 ---
 

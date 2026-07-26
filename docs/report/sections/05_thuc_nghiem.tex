@@ -82,14 +82,30 @@ Mục~\ref{sec:ky-thuat-selfcorrect}).
 
 \subsection{Thiết kế thí nghiệm}
 
-Ma trận $2 \times 2$: \{ReAct, Plan-and-Execute\} $\times$ \{mock,
-Gemini\}, trong đó \emph{mock} là MockLLM heuristic tất định (baseline không
-cần mạng) và \emph{Gemini} là \texttt{gemini-3.1-flash-lite} qua endpoint
-tương thích OpenAI. Mỗi cấu hình chạy toàn bộ 66 case với $n = 2$
-lượt/case --- con số lượt bị giới hạn chủ động bởi quota và rate limit của
-free tier Gemini (mỗi lượt case mất tới hàng phút khi dính 429); hạn chế này
-được ghi nhận ở Mục~\ref{sec:gioi-han}. Bộ case và prompt được đóng băng
-trước khi chạy; mỗi lượt chạy trên một DB SQLite mới tinh, cô lập hoàn toàn.
+Thiết kế dự kiến là ma trận $2 \times 2$: \{ReAct, Plan-and-Execute\}
+$\times$ \{mock, Gemini\}, trong đó \emph{mock} là MockLLM tất định
+(baseline không cần mạng) và \emph{Gemini} là
+\texttt{gemini-3.1-flash-lite} qua endpoint tương thích OpenAI. Thực tế
+triển khai gồm hai phần:
+
+\begin{itemize}
+  \item \textbf{Phần mock --- đầy đủ}: 2 chiến lược $\times$ 66 case
+        $\times$ $n = 3$ lượt/case $=$ 396 run, chạy trọn vẹn không thiếu ô
+        nào. Đây là nguồn số liệu chính của Mục~\ref{sec:ket-qua}.
+  \item \textbf{Phần Gemini --- mẫu minh họa}: kế hoạch ban đầu chạy đủ cả
+        hai chiến lược trên 66 case với $n = 2$, nhưng free tier Gemini
+        (500 request/ngày, kèm rate limit theo phút) cạn quota giữa chừng;
+        phạm vi được thu hẹp còn một cấu hình ReAct $\times$ Gemini trên
+        \textbf{22/66 case} đại diện (phủ 7/8 nhóm hành vi, thiếu nhóm
+        tiếng Việt/UX) với $n = 3$ lượt/case $=$ 66 run. Mẫu này đủ để
+        minh họa hành vi của model thật (token, chi phí, độ trễ, nhóm case
+        dễ/khó) nhưng \emph{không} đủ để so sánh chéo model hay so sánh hai
+        chiến lược trên model thật --- việc đo ma trận đầy đủ với model
+        thật được chuyển sang hướng phát triển (Mục~\ref{sec:gioi-han}).
+\end{itemize}
+
+Bộ case và prompt được đóng băng trước khi chạy; mỗi lượt chạy trên một DB
+SQLite mới tinh, cô lập hoàn toàn.
 
 Runner thí nghiệm (\texttt{python -m laplace.evals.experiment}) có
 checkpoint từng run (ghi ngay sau mỗi run, Ctrl+C an toàn, chạy lại cùng tên
@@ -113,16 +129,19 @@ judge gồm yêu cầu gốc, câu trả lời cuối của agent và tiêu chí
 tự nhiên; judge buộc trả JSON \texttt{\{passed, reason\}}; sai schema thì
 retry một lần, vẫn sai thì tính fail kèm lý do rõ ràng. Judge dùng chính
 provider abstraction của hệ thống nhưng là một phiên provider tách riêng
-khỏi agent; theo khuyến nghị của~\cite{zheng2023judge}, model chấm
-(\todo{ghi model judge thuc te tu evals/results/exp-final}) cần khác model
-agent để tránh self-preference bias --- giới hạn thực tế của lựa chọn này
-được thảo luận ở Mục~\ref{sec:gioi-han}.
+khỏi agent; theo khuyến nghị của~\cite{zheng2023judge}, model chấm cần khác
+model agent để tránh self-preference bias. Trong lần chạy mẫu Gemini của
+\texttt{exp-final}, judge dùng chính \texttt{gemini-3.1-flash-lite} (cùng
+model với agent) vì đây là model thật duy nhất khả dụng trong phạm vi đồ án
+--- một vi phạm có chủ đích so với khuyến nghị trên, được ghi nhận thành
+giới hạn ở Mục~\ref{sec:gioi-han}.
 
 \subsection{Môi trường và tham số}
 
-Thí nghiệm chạy trên máy cá nhân macOS
-(\todo{dien chip/RAM/phien ban macOS}), Python 3.14, mã nguồn tại commit
-\todo{dien commit hash cua lan chay exp-final}. Giới hạn an toàn giữ nguyên
+Thí nghiệm chạy trên máy cá nhân macOS 15.7 (CPU Intel 2{,}1\,GHz, RAM
+32\,GB), Python 3.14, mã nguồn tại commit \texttt{906889f} (kết quả được
+lưu tại commit \texttt{8ea9d2b}, thư mục
+\texttt{evals/results/exp-final/}). Giới hạn an toàn giữ nguyên
 giá trị mặc định của hệ thống: tối đa 8 bước/tác vụ, timeout công cụ
 15\,giây, timeout tác vụ 180\,giây, retry công cụ theo phân loại lỗi
 (Bảng~\ref{tab:error-taxonomy}), tự sửa schema tối đa 2 lần, trần chi phí

@@ -45,16 +45,16 @@ Không — executor bọc mọi tool: validate tham số, retry có backoff, tim
 ## Nhóm đánh giá & thực nghiệm
 
 **13. Đánh giá agent bằng cách nào? Vì sao tin được số liệu?**
-Eval harness chạy 66 case YAML (8 nhóm, gồm cả injection và phục hồi lỗi) qua **đúng agent loop production**, mỗi run một DB sạch, chấm rule-based theo kỳ vọng khai báo (status, route, tập tool, tool cấm, chuỗi trong câu trả lời) → 9 metric. LLM không tất định nên mỗi cấu hình chạy ≥3 lần và báo cáo trung bình.
+Eval harness chạy 66 case YAML (8 nhóm, gồm cả injection và phục hồi lỗi) qua **đúng agent loop production**, mỗi run một DB sạch, chấm rule-based theo kỳ vọng khai báo (status, route, tập tool, tool cấm, chuỗi trong câu trả lời) → 9 metric. LLM không tất định nên mỗi cấu hình chạy n=3 lượt và báo cáo trung bình (exp-final: 462 run tổng).
 
 **14. LLM-as-judge có đáng tin không? Thiên vị thì sao?**
-Judge chỉ dùng cho tiêu chí chất lượng khó chấm bằng rule, là tùy chọn bổ sung chứ không thay rule-based. Chống thiên vị: model chấm tách khỏi model agent (tránh self-preference). Giới hạn ghi rõ trong báo cáo: mới pass/fail theo tiêu chí từng case, chưa kiểm chứng chéo tay trên mẫu lớn.
+Judge chỉ dùng cho tiêu chí chất lượng khó chấm bằng rule, là tùy chọn bổ sung chứ không thay rule-based. Thiết kế cho phép tách model chấm khỏi model agent (tránh self-preference); giới hạn thực tế ghi thẳng trong báo cáo: lần chạy mẫu judge dùng chính `gemini-3.1-flash-lite` vì đó là model thật duy nhất khả dụng, và judge mới pass/fail theo tiêu chí từng case, chưa kiểm chứng chéo tay trên mẫu lớn. Đáng chú ý: judge vẫn chấm **fail** chính model đó ở 6/9 run (scheduler bị từ chối, recovery không đổi nguồn) — không thấy dấu hiệu nương tay.
 
-**15. Thí nghiệm 2×2 kiểm soát biến thế nào?**
-Đóng băng bộ case + prompt trước khi chạy; cùng 66 case cho cả 4 cấu hình {ReAct, Plan-Execute} × {2 model}; ≥3 run/case; mỗi run DB sạch; runner có checkpoint/resume và chịu rate limit nên số liệu không bị méo bởi lỗi giữa chừng.
+**15. Thí nghiệm kiểm soát biến thế nào? Vì sao không đủ ma trận 2×2?**
+Đóng băng bộ case + prompt trước khi chạy; n=3 run/case; mỗi run DB sạch; runner có checkpoint/resume và chịu rate limit nên số liệu không bị méo bởi lỗi giữa chừng. Thực tế: phần mock chạy **đầy đủ** 2 chiến lược × 66 case × n=3 = 396 run; phần Gemini kế hoạch chạy đủ ma trận nhưng free tier (500 req/ngày) cạn quota nên thu hẹp còn **mẫu minh họa** ReAct × 22 case × n=3 = 66 run — ghi trung thực thành giới hạn trong báo cáo, so sánh chéo model đầy đủ là future work.
 
 **16. Kết quả chính của thực nghiệm là gì?**
-*(Điền số thật từ `evals/results/` trước ngày bảo vệ — nhớ 3–4 con số đinh: success rate từng chiến lược, chênh lệch cost/latency, recovery rate, nhóm case yếu nhất.)* Cấu trúc trả lời: "Chiến lược X thành công cao hơn Y điểm nhưng tốn Z lần token; nhóm case khó nhất là …; từ đó em chọn cấu hình mặc định là …".
+Ba con số đinh (nguồn: `evals/results/exp-final/`): (1) trên môi trường mock, khung agent đạt **100% ở mọi run trùng chiến lược gốc** — ReAct 171/171, Plan-Execute 27/27 — chứng minh khung chạy đúng cả 2 chiến lược; (2) trên model thật (mẫu Gemini `gemini-3.1-flash-lite` × ReAct, 22 case × n=3), success rate **72,7%** (48/66 run), route accuracy **94,4%**, tool-selection 82,5%; (3) nhóm yếu nhất là **nhiều bước (52,4%)** và **phục hồi lỗi (0/3)** — model thừa nhận lỗi fetch nhưng không tự đổi sang tìm kiếm; nhóm mạnh nhất là direct/clarify và **injection: không run nào bị vượt** (6/6 Gemini + 30/30 mock). Từ đó giữ ReAct làm chiến lược mặc định. Lưu ý trung thực: mock là môi trường kịch bản nên chỉ so được success/route/tool, không so cost/latency; so sánh 2 chiến lược trên model thật chưa làm được vì quota — là future work.
 
 **17. Sao không đo trên benchmark chuẩn (AgentBench, WebArena…)?**
 Benchmark chuẩn đo năng lực chung của model trong môi trường của họ; câu hỏi của đồ án là "hệ thống **của em**, tool của em, tiếng Việt, chiến lược nào/model nào tốt hơn" — cần bộ eval bám đúng 6 tool và hành vi thật của hệ thống. Phương pháp (case cố định, metric, lặp nhiều run) học từ các benchmark đó.
@@ -62,7 +62,7 @@ Benchmark chuẩn đo năng lực chung của model trong môi trường của h
 ## Nhóm vận hành & giới hạn
 
 **18. Chi phí chạy thật khoảng bao nhiêu?**
-Token + cost ghi từng lệnh gọi LLM trong trace nên trả lời được bằng số đo, không ước lượng. *(Xem trước một con số trung bình/task từ trace hoặc eval results để nói ngay; free tier Gemini đủ cho demo/eval, có retry 429 theo gợi ý của API.)*
+Token + cost ghi từng lệnh gọi LLM trong trace nên trả lời được bằng số đo, không ước lượng. Số từ mẫu Gemini exp-final (66 run): trung bình **~3.800 token/task** (prompt ~3.400 + completion ~400), chi phí ước tính **~$0,0005/task** — cả 66 run hết **~$0,033**. Độ trễ trung vị ~5s/task; trung bình 25,7s vì bị kéo bởi backoff khi dính 429 của free tier (11/66 run >60s). Free tier Gemini (500 req/ngày) đủ cho demo nhưng là nút thắt của eval — chính vì vậy phần model thật chỉ là mẫu 22 case.
 
 **19. Mất mạng / API sập ngay lúc demo thì sao?**
 Đã dự phòng 2 lớp: chế độ **replay** phát lại trace thật từ DB, hoàn toàn offline, đúng nhịp thời gian (đang demo được ngay); và video quay sẵn. Ngoài demo, hệ thống chạy được không cần key nào nhờ mock LLM + stub search — toàn bộ test và eval mock chạy offline.
