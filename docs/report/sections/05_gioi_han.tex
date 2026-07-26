@@ -1,0 +1,41 @@
+\section{Giới hạn và hướng phát triển}
+\label{sec:gioi-han}
+
+\subsection{Giới hạn}
+
+\begin{itemize}
+  \item \textbf{Phạm vi kênh và hạ tầng}: chỉ hỗ trợ Telegram; một tiến trình,
+        SQLite, scheduler in-process --- phù hợp quy mô cá nhân, chưa phân tán.
+  \item \textbf{Bảo mật}: REST API mới bảo vệ bằng một API key đơn (header),
+        chưa có auth thật; định danh người dùng dựa vào Telegram.
+  \item \textbf{Chống prompt injection ở mức cơ bản}: đóng khung dữ liệu +
+        quy tắc trong system prompt; không có bảo đảm tuyệt đối trước tấn công
+        tinh vi hơn (đây là bài toán mở của cả lĩnh vực).
+  \item \textbf{Memory dài hạn}: mới dừng ở hồ sơ người dùng dạng JSON, agent
+        chưa khai thác; chưa có vector memory/RAG.
+  \item \textbf{Giới hạn kỹ thuật}: timeout không kill được thread công cụ
+        đang chạy (giới hạn Python) --- thread cũ được bỏ lại có kiểm soát;
+        mỗi tác vụ chiếm một thread khi chạy.
+  \item \textbf{Đánh giá}: LLM-as-judge mới chấm pass/fail theo tiêu chí từng
+        case, chưa có thang điểm nhiều mức và chưa kiểm chứng chéo tay trên
+        mẫu lớn; bộ 37 case chưa phủ hết không gian hành vi.
+        % PLACEHOLDER: bo sung gioi han rut ra tu so lieu thuc nghiem
+        % (vd: variance giua cac run, nhom case yeu nhat).
+\end{itemize}
+
+\subsection{Hướng phát triển}
+
+\begin{itemize}
+  \item Mở rộng kênh (web chat/Slack) trên cùng lõi agent; PostgreSQL và
+        scheduler phân tán khi cần đa máy.
+  \item Memory dài hạn có cấu trúc + RAG cho tri thức cá nhân.
+  \item Phòng thủ injection nhiều lớp hơn (bộ lọc đầu ra công cụ, sandbox
+        quyền theo từng tác vụ).
+  \item Mở rộng eval: thêm case đối kháng, thang điểm judge nhiều mức có kiểm
+        chứng người, đo chi phí--chất lượng theo Pareto để chọn model.
+\end{itemize}
+
+\section*{Kết luận}
+
+% PLACEHOLDER: viet sau khi co ket qua — tom tat dong gop + so lieu chinh +
+% bai hoc lon nhat (vd: gia tri cua trace day du va eval lap lai duoc).

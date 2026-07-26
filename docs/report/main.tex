@@ -1,0 +1,72 @@
+% ============================================================
+% Bao cao do an: Laplace's Demon — AI Agent ca nhan qua Telegram
+%
+% Bien dich:
+%   latexmk -pdf main.tex
+% hoac:
+%   pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+%
+% Yeu cau goi tieng Viet: vntex + babel-vietnamese (co san trong TeX Live
+% scheme-full; ban cai gon thi `tlmgr install vntex babel-vietnamese`).
+% Khong co TeX local? Da kiem chung bien dich sach bang Docker:
+%   docker run --rm -v "$PWD":/work -w /work texlive/texlive:latest \
+%     latexmk -pdf -interaction=nonstopmode main.tex
+%
+% Cau truc: van de -> kien truc -> thuc nghiem -> ket qua -> gioi han.
+% Phan ket qua (sections/04_ket_qua.tex) dang la PLACEHOLDER — dien so lieu
+% tu eval_results/ (bang summary trong report.md / results.json) khi thi
+% nghiem 2x2 chay xong.
+% ============================================================
+\documentclass[a4paper,12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc}
+\usepackage[vietnamese]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}      % bang dep (\toprule/\midrule/\bottomrule)
+\usepackage{amsmath}
+\usepackage{amssymb}   % \rightleftarrows trong so do trang thai
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep}
+
+% Duong dan hinh: xuat bieu do tu eval harness vao thu muc figures/
+\graphicspath{{figures/}}
+
+\title{\textbf{Laplace's Demon}\\
+  \large AI Agent cá nhân qua Telegram:\\
+  vòng lặp tự hành có quan sát được và đánh giá định lượng}
+\author{Nguyễn Thành\thanks{Thông tin lớp/khoa/trường — điền sau.}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+% PLACEHOLDER: viet cuoi cung, sau khi co so lieu.
+Báo cáo trình bày Laplace's Demon, một AI agent cá nhân nhận yêu cầu ngôn ngữ
+tự nhiên qua Telegram và tự thực hiện vòng lặp phân tích --- lập kế hoạch ---
+gọi công cụ --- quan sát --- điều chỉnh --- trả lời. Khác với các lớp vỏ gọi
+API LLM, hệ thống đặt trọng tâm vào độ tin cậy (giới hạn bước, timeout, xác
+nhận người dùng), khả năng quan sát (full execution trace) và đánh giá định
+lượng (eval harness 37 test case, 9 metric, tùy chọn LLM-as-judge). Thực
+nghiệm so sánh hai chiến lược điều phối (ReAct, Plan-and-Execute) trên hai
+mô hình ngôn ngữ cho thấy \dots\ % PLACEHOLDER: 1--2 cau ket qua chinh.
+\end{abstract}
+
+\tableofcontents
+\clearpage
+
+\input{sections/01_van_de}
+\input{sections/02_kien_truc}
+\input{sections/03_thuc_nghiem}
+\input{sections/04_ket_qua}
+\input{sections/05_gioi_han}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}
