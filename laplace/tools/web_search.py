@@ -58,17 +58,18 @@ def web_search(params: WebSearchParams, ctx: ToolContext) -> ToolResult:
             ok=True,
             data={"results": _stub_results(params.query, params.max_results), "stub": True},
         )
+    # Loi mang/timeout/HTTP de executor phan loai theo taxonomy va retry + backoff.
+    resp = httpx.post(
+        TAVILY_URL,
+        json={
+            "api_key": settings.search_api_key,
+            "query": params.query,
+            "max_results": params.max_results,
+        },
+        timeout=settings.tool_timeout_s,
+    )
+    resp.raise_for_status()
     try:
-        resp = httpx.post(
-            TAVILY_URL,
-            json={
-                "api_key": settings.search_api_key,
-                "query": params.query,
-                "max_results": params.max_results,
-            },
-            timeout=settings.tool_timeout_s,
-        )
-        resp.raise_for_status()
         payload = resp.json()
         results = [
             {
@@ -78,6 +79,6 @@ def web_search(params: WebSearchParams, ctx: ToolContext) -> ToolResult:
             }
             for item in payload.get("results", [])[: params.max_results]
         ]
-        return ToolResult(ok=True, data={"results": results, "stub": False})
     except Exception as e:
-        return ToolResult(ok=False, error=f"web_search failed: {e}")
+        return ToolResult(ok=False, error=f"web_search could not parse response: {e}")
+    return ToolResult(ok=True, data={"results": results, "stub": False})
