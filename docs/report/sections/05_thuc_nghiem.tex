@@ -1,0 +1,132 @@
+\section{Phương pháp thực nghiệm}
+\label{sec:thuc-nghiem}
+
+\subsection{Câu hỏi nghiên cứu}
+
+\begin{itemize}
+  \item \textbf{RQ1}: Chiến lược điều phối (ReAct vs.\ Plan-and-Execute) ảnh
+        hưởng thế nào đến tỷ lệ thành công, chi phí và độ trễ?
+  \item \textbf{RQ2}: Chất lượng mô hình ảnh hưởng thế nào đến các metric trên
+        --- cụ thể, mô hình thật (Gemini) hơn/kém baseline heuristic tất định
+        ở nhóm case nào, và có tương tác với chiến lược không?
+  \item \textbf{RQ3}: Agent chống chịu ra sao trước lỗi công cụ (phục hồi) và
+        prompt injection?
+\end{itemize}
+
+\subsection{Bộ test case}
+\label{sec:bo-case}
+
+Bộ đánh giá gồm \textbf{66 case} cố định, khai báo bằng YAML trong 18 file,
+phủ 8 nhóm hành vi (Bảng~\ref{tab:case-groups}). Mỗi case khai báo: yêu cầu
+đầu vào (tiếng Việt hoặc tiếng Anh), kỳ vọng (\texttt{status},
+\texttt{route}, tập công cụ \texttt{tools}/\texttt{tools\_match}, công cụ bị
+cấm \texttt{forbid\_tools}, chuỗi phải có trong câu trả lời
+\texttt{answer\_contains}), kịch bản bấm nút xác nhận (đồng ý/từ chối), công
+cụ cần giả lập lỗi (\texttt{patch\_tools}), dữ liệu mồi (\texttt{seed}),
+kịch bản mock (\texttt{mock\_script}) và tiêu chí \texttt{judge} (tùy chọn).
+
+\begin{table}[ht]
+\centering
+\caption{Phân bố 66 case theo 8 nhóm. Nhãn (tag) của case có thể chồng nhau
+--- ví dụ các case scheduler vừa là ``một công cụ'' vừa là ``xác nhận'' ---
+nên bảng xếp theo nhóm chức năng chính của từng file case.}
+\label{tab:case-groups}
+\begin{tabular}{lcl}
+\toprule
+Nhóm & Số case & Nội dung tiêu biểu \\
+\midrule
+Trả lời trực tiếp / hỏi lại  & 8  & chào hỏi, câu mơ hồ cần clarify \\
+Một công cụ                  & 13 & tìm kiếm, ghi chú, việc cần làm, cron \\
+Nhiều bước                   & 10 & tìm + đọc trang + viết báo cáo \\
+Xác nhận (HITL)              & 11 & duyệt, từ chối, đổi hướng sau từ chối \\
+Phục hồi lỗi                 & 6  & công cụ hỏng giả lập, đổi nguồn \\
+Prompt injection             & 10 & chỉ dẫn độc cài trong nội dung web \\
+Đường lỗi                    & 4  & công cụ hỏng vĩnh viễn, đầu vào xấu \\
+Tiếng Việt / UX              & 4  & chất lượng diễn đạt, đúng ngôn ngữ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ba case thuộc nhóm xác nhận/phục hồi có tiêu chí \emph{chất lượng diễn đạt}
+không chấm được bằng luật cứng (ví dụ: sau khi người dùng từ chối xóa, câu
+trả lời phải xác nhận lịch sự rằng không có gì bị xóa) --- các case này mang
+field \texttt{judge} và được chấm bằng LLM-as-judge
+(Mục~\ref{sec:llm-judge}).
+
+\subsection{Metric}
+\label{sec:metric}
+
+Tám metric tổng hợp tự động từ trace (Mục~\ref{sec:trace-store}), không cần
+instrument thêm:
+
+\begin{enumerate}
+  \item \textbf{Success rate}: tỷ lệ case đạt toàn bộ kỳ vọng khai báo;
+  \item \textbf{Route accuracy}: tỷ lệ phân loại đúng tuyến
+        (direct/clarify/một công cụ/nhiều bước);
+  \item \textbf{Tool-selection accuracy}: tỷ lệ chọn đúng công cụ theo kỳ vọng
+        (khớp chuỗi hoặc khớp tập, tùy case khai báo);
+  \item \textbf{Recovery rate}: tỷ lệ hoàn thành trong các case có gắn nhãn
+        phục hồi (công cụ bị giả lập lỗi);
+  \item \textbf{Số bước trung bình} mỗi tác vụ;
+  \item \textbf{Số lệnh gọi LLM trung bình} mỗi tác vụ;
+  \item \textbf{Token và chi phí trung bình} mỗi tác vụ (USD, theo bảng giá
+        model);
+  \item \textbf{Thời gian chạy trung bình} mỗi tác vụ (kèm p95 trong báo cáo
+        chi tiết).
+\end{enumerate}
+
+Ngoài ra hai chỉ số bổ trợ: \emph{judge pass rate} (khi bật LLM-as-judge,
+trên các case có tiêu chí wording) và \emph{số lần tự sửa schema} (đếm các
+lệnh gọi purpose \texttt{:fixN} trong trace,
+Mục~\ref{sec:ky-thuat-selfcorrect}).
+
+\subsection{Thiết kế thí nghiệm}
+
+Ma trận $2 \times 2$: \{ReAct, Plan-and-Execute\} $\times$ \{mock,
+Gemini\}, trong đó \emph{mock} là MockLLM heuristic tất định (baseline không
+cần mạng) và \emph{Gemini} là \texttt{gemini-3.1-flash-lite} qua endpoint
+tương thích OpenAI. Mỗi cấu hình chạy toàn bộ 66 case với $n = 2$
+lượt/case --- con số lượt bị giới hạn chủ động bởi quota và rate limit của
+free tier Gemini (mỗi lượt case mất tới hàng phút khi dính 429); hạn chế này
+được ghi nhận ở Mục~\ref{sec:gioi-han}. Bộ case và prompt được đóng băng
+trước khi chạy; mỗi lượt chạy trên một DB SQLite mới tinh, cô lập hoàn toàn.
+
+Runner thí nghiệm (\texttt{python -m laplace.evals.experiment}) có
+checkpoint từng run (ghi ngay sau mỗi run, Ctrl+C an toàn, chạy lại cùng tên
+thí nghiệm thì tiếp tục từ chỗ dừng) và chịu rate limit ở hai tầng: tầng
+provider tự retry 429 theo gợi ý thời gian chờ của API, tầng runner retry cả
+case với backoff mũ khi lỗi vẫn thuộc dạng tạm thời. Nhờ đó số liệu không bị
+méo bởi lỗi hạ tầng giữa chừng.
+
+Một lưu ý phương pháp với các ô mock: \texttt{mock\_script} của case gắn với
+chiến lược gốc của case; khi ép chạy chiến lược còn lại, runner bỏ script và
+MockLLM rơi về chế độ heuristic (vẫn tất định nhưng không được ``mớm'' từng
+bước). Vì vậy ở cột mock, ô trùng chiến lược gốc phản ánh sát khả năng của
+khung agent, ô còn lại chủ yếu kiểm tra khung không đổ vỡ --- diễn giải số
+liệu ở Mục~\ref{sec:ket-qua} tôn trọng ranh giới này.
+
+\subsection{LLM-as-judge}
+\label{sec:llm-judge}
+
+Các case có field \texttt{judge} được chấm thêm bởi một LLM riêng: prompt
+judge gồm yêu cầu gốc, câu trả lời cuối của agent và tiêu chí bằng ngôn ngữ
+tự nhiên; judge buộc trả JSON \texttt{\{passed, reason\}}; sai schema thì
+retry một lần, vẫn sai thì tính fail kèm lý do rõ ràng. Judge dùng chính
+provider abstraction của hệ thống nhưng là một phiên provider tách riêng
+khỏi agent; theo khuyến nghị của~\cite{zheng2023judge}, model chấm
+(\todo{ghi model judge thuc te tu evals/results/exp-final}) cần khác model
+agent để tránh self-preference bias --- giới hạn thực tế của lựa chọn này
+được thảo luận ở Mục~\ref{sec:gioi-han}.
+
+\subsection{Môi trường và tham số}
+
+Thí nghiệm chạy trên máy cá nhân macOS
+(\todo{dien chip/RAM/phien ban macOS}), Python 3.14, mã nguồn tại commit
+\todo{dien commit hash cua lan chay exp-final}. Giới hạn an toàn giữ nguyên
+giá trị mặc định của hệ thống: tối đa 8 bước/tác vụ, timeout công cụ
+15\,giây, timeout tác vụ 180\,giây, retry công cụ theo phân loại lỗi
+(Bảng~\ref{tab:error-taxonomy}), tự sửa schema tối đa 2 lần, trần chi phí
+0{,}25~USD một lần chạy tác vụ. Trước khi chạy ma trận, toàn bộ 164 test
+pytest (offline, dùng MockLLM scripted) và 66/66 case eval ở chế độ mock
+scripted đều đạt --- bộ mock đóng vai trò regression test bảo đảm khung
+agent và harness hoạt động đúng trước khi đo LLM thật.

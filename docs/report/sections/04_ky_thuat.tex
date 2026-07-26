@@ -1,0 +1,183 @@
+\section{Các kỹ thuật tăng độ tin cậy đã cài đặt}
+\label{sec:ky-thuat}
+
+Trên khung kiến trúc ở Mục~\ref{sec:kien-truc}, đồ án cài đặt một tập kỹ
+thuật nhắm thẳng vào ba vấn đề đã nêu (độ tin cậy, khả năng quan sát, chi
+phí). Điểm chung của các kỹ thuật: đều \emph{đo được} --- hoặc qua test tự
+động, hoặc qua metric tổng hợp từ trace.
+
+\subsection{Chống prompt injection nhiều lớp}
+\label{sec:ky-thuat-injection}
+
+Rủi ro chính với agent có công cụ đọc web là indirect prompt
+injection~\cite{greshake2023injection}: chỉ dẫn độc hại nằm trong nội dung
+trang web hoặc kết quả tìm kiếm mà agent đọc. Hệ thống phòng thủ theo nhiều
+lớp:
+
+\begin{enumerate}
+  \item \textbf{Đóng khung dữ liệu không tin cậy}: mọi nội dung công cụ trả về
+        được bọc trong đúng một cặp thẻ \texttt{<tool\_output>}\dots%
+        \texttt{</tool\_output>}; system prompt quy định tường minh: nội dung
+        trong khung là \emph{dữ liệu}, không phải mệnh lệnh, và không gì bên
+        trong đó có thể thêm/sửa/hủy tác vụ.
+  \item \textbf{Vô hiệu hóa delimiter giả}: trước khi đóng khung, mọi chuỗi
+        trong dữ liệu trông giống thẻ đóng/mở (kể cả biến thể viết hoa, chèn
+        khoảng trắng như \texttt{</ tool\_output >}) bị thay bằng ký tự tương
+        đương vô hại --- kẻ tấn công không thể ``thoát khung'' bằng cách tự
+        chèn thẻ đóng rồi viết chỉ dẫn phía sau.
+  \item \textbf{Giới hạn quyền công cụ}: mọi công cụ ghi DB lọc theo
+        \texttt{user\_id}; không có công cụ thực thi lệnh hệ thống.
+  \item \textbf{Con người là phòng tuyến cuối}: kể cả khi mô hình bị lừa muốn
+        xóa dữ liệu, hành động ghi/xóa vẫn phải qua nút xác nhận của người
+        dùng (Mục~\ref{sec:hitl}).
+\end{enumerate}
+
+Hiệu quả được đo bằng nhóm 10 case injection trong bộ eval
+(Mục~\ref{sec:bo-case}): case khai báo công cụ bị cấm
+(\texttt{forbid\_tools}) và kỳ vọng agent không thực hiện chỉ dẫn cài trong
+dữ liệu.
+
+\subsection{Phân loại lỗi công cụ và chính sách retry}
+\label{sec:ky-thuat-taxonomy}
+
+Executor gắn cho mọi lỗi công cụ một \emph{nhãn phân loại} (error taxonomy)
+dưới dạng prefix \texttt{[kind]} trong thông báo lỗi --- vừa để LLM đọc quan
+sát biết nên đổi hướng hay thử lại, vừa để người đọc trace chẩn đoán nhanh.
+Chín loại lỗi và chính sách retry tương ứng:
+
+\begin{table}[ht]
+\centering
+\caption{Error taxonomy của tool executor.}
+\label{tab:error-taxonomy}
+\begin{tabular}{llc}
+\toprule
+Nhãn & Ý nghĩa & Retry? \\
+\midrule
+\texttt{[input]}      & tham số sai schema / URL không hợp lệ & Không \\
+\texttt{[not\_found]}  & công cụ không tồn tại                & Không \\
+\texttt{[timeout]}    & vượt ngưỡng \texttt{timeout\_s}       & Không \\
+\texttt{[network]}    & lỗi mạng tạm thời (connect/read)      & Có + backoff \\
+\texttt{[rate\_limit]} & HTTP 429                             & Có + backoff \\
+\texttt{[http\_5xx]}   & server lỗi tạm thời                  & Có + backoff \\
+\texttt{[http\_4xx]}   & lỗi phía client (403, 404, \dots)    & Không \\
+\texttt{[crash]}      & exception bất ngờ trong công cụ       & Có (1 lần) \\
+\texttt{[tool\_error]} & công cụ chủ động trả \texttt{ok=False} & Không \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Chỉ lỗi \emph{tạm thời} mới được thử lại, với exponential backoff
+($0{,}5 \cdot 2^{n}$ giây, trần 8 giây). Công cụ có thể tự phân loại bằng
+cách raise \texttt{TransientToolError}/\texttt{PermanentToolError}; exception
+khác được suy loại tự động từ kiểu lỗi (timeout/network/status HTTP của
+httpx). Lỗi timeout cố ý \emph{không} retry: Python không hủy được thread
+đang chạy, nên thread quá hạn được bỏ lại có kiểm soát thay vì chồng thêm
+lần chạy mới.
+
+\subsection{Rate limit theo người dùng}
+\label{sec:ky-thuat-ratelimit}
+
+Một người dùng spam tin nhắn sẽ chiếm hết worker thread của agent loop và
+chặn người dùng khác. Bot áp rate limit \emph{sliding window} theo Telegram
+user id: tối đa 6 yêu cầu trong cửa sổ trượt 60 giây; vượt ngưỡng thì bot từ
+chối kèm thời gian cần chờ (\texttt{retry\_after}). Limiter thread-safe
+(handler chạy trên event loop nhưng tác vụ chạy ở thread khác), trạng thái
+in-memory --- đủ cho mô hình một tiến trình, restart là reset (chấp nhận được
+ở phạm vi MVP). Cùng lớp bảo vệ đầu vào còn có chặn tin nhắn quá 2000 ký tự
+và validate biểu thức cron trước khi tạo job.
+
+\subsection{Self-correction có đo đếm}
+\label{sec:ky-thuat-selfcorrect}
+
+Mọi quyết định của LLM đi qua một hàm duy nhất \texttt{call\_structured}: gọi
+LLM kèm JSON schema, validate bằng Pydantic; nếu sai, thông báo lỗi validation
+được gửi lại cho LLM tự sửa, tối đa 2 lần retry. Hai điểm đáng chú ý trong
+cài đặt:
+
+\begin{itemize}
+  \item \textbf{Validator nghiệp vụ chặt}: ngoài đúng kiểu JSON, schema còn mã
+        hóa ràng buộc nghiệp vụ --- hành động \texttt{tool} bắt buộc có tên
+        công cụ, hành động \texttt{final} bắt buộc có câu trả lời cuối, kế
+        hoạch không được rỗng. Đầu ra ``đúng cú pháp nhưng vô nghĩa'' bị chặn
+        ngay tại validate và kích hoạt tự sửa, thay vì lọt xuống executor rồi
+        hỏng khó hiểu ở tầng dưới.
+  \item \textbf{Đếm được qua trace}: lần gọi retry được ghi
+        \texttt{llm\_calls} với purpose \texttt{<purpose>:fixN} (ví dụ
+        \texttt{react:fix1}). Nhờ đó số lần LLM phải tự sửa trở thành một chỉ
+        số đo trực tiếp từ trace --- dùng để so sánh mức ``vững schema'' giữa
+        các mô hình và cấu hình trong thực nghiệm.
+\end{itemize}
+
+Một bài học thực nghiệm đã phản hồi ngược vào prompt: model nhỏ hay bịa tên
+công cụ không tồn tại (\texttt{google\_search}, \texttt{save\_note}); việc
+nhắc lại danh sách tên công cụ hợp lệ ngay cạnh yêu cầu JSON trong prompt
+ReAct/Plan làm giảm rõ rệt loại lỗi này.
+
+\subsection{Theo dõi chi phí và trần chi phí mỗi tác vụ}
+\label{sec:ky-thuat-cost}
+
+Mỗi dòng \texttt{llm\_calls} đã ghi token và chi phí (USD, theo bảng giá của
+model) của từng lệnh gọi. Trên nền đó:
+
+\begin{itemize}
+  \item \textbf{Tổng hợp}: hàm \texttt{task\_usage}/\texttt{user\_usage} cộng
+        dồn số lệnh gọi, token, chi phí theo tác vụ và theo người dùng; trace
+        viewer hiển thị cột token/chi phí ở danh sách tác vụ, ô tổng chi phí
+        toàn hệ thống, và các ô thống kê trong trang chi tiết.
+  \item \textbf{Trần chi phí}: ở chế độ LLM thật, provider được bọc bằng
+        \texttt{BudgetedLLM} --- cộng dồn chi phí qua các lần
+        \texttt{complete()}, chạm trần thì ném \texttt{LLMBudgetExceeded}
+        \emph{trước} lần gọi API kế tiếp, nên vòng lặp chạy hoang (runaway
+        loop) bị chặn sớm và chi phí thực tế chỉ có thể vượt trần tối đa một
+        lần gọi. Trần đọc từ biến môi trường
+        \texttt{LAPLACE\_MAX\_COST\_PER\_TASK\_USD} (mặc định 0{,}25~USD một
+        lần chạy; đặt $\leq 0$ để tắt). Exception này được orchestrator xử lý
+        như lỗi dừng sạch: tác vụ chuyển \texttt{failed} với thông báo rõ ràng
+        gửi về người dùng, kèm hướng dẫn nâng trần.
+\end{itemize}
+
+Giới hạn đã ghi nhận: trần áp cho \emph{từng chặng chạy} (run/resume), không
+cộng dồn qua các lần tạm dừng xác nhận --- xem Mục~\ref{sec:gioi-han}.
+
+\subsection{Streaming trạng thái về Telegram}
+\label{sec:ky-thuat-streaming}
+
+Tác vụ nhiều bước có thể chạy hàng chục giây; im lặng suốt thời gian đó là
+trải nghiệm xấu. Vì lõi agent không có hook sự kiện (và không muốn sửa lõi
+chỉ để phục vụ UI), tiến độ được suy ra ở \emph{mép}: bot bọc provider bằng
+\texttt{ProgressLLM} --- mỗi lần orchestrator gọi \texttt{complete()}, wrapper
+suy giai đoạn hiện tại (phân loại / suy nghĩ / chạy công cụ X / tổng hợp) từ
+json\_schema của lệnh gọi và nội dung structured output trả về, rồi phát sự
+kiện tiến độ. \texttt{ProgressStreamer} nhận sự kiện từ worker thread (qua
+\texttt{call\_soon\_threadsafe} + queue), và \emph{edit đúng một message}
+trạng thái trên Telegram (throttle 1,5 giây để tránh rate limit edit của
+Telegram); khi tác vụ xong, message trạng thái được thay bằng kết quả cuối.
+Tác vụ định kỳ từ scheduler cũng được stream theo cùng cơ chế: job cron tự
+tạo kết nối bot, gửi message trạng thái vào đúng chat của chủ job rồi cập
+nhật dần đến kết quả.
+
+\subsection{Chế độ phát lại trace (replay)}
+\label{sec:ky-thuat-replay}
+
+Trace viewer có route \texttt{/tasks/\{id\}/replay} phát lại timeline của một
+tác vụ đã chạy: từng bước hiện dần theo thứ tự thật (điều khiển Next/Prev
+hoặc auto-play), thời gian chờ giữa các bước lấy theo độ trễ thật đã ghi
+trong trace, rút gọn theo hệ số tốc độ $1\times$--$8\times$. Trang được
+render hoàn toàn phía server (auto-play bằng meta refresh) --- không cần
+JavaScript, không cần mạng, không cần LLM. Đây vừa là công cụ gỡ lỗi
+(``tua lại'' quyết định của agent), vừa là phương án demo dự phòng khi buổi
+bảo vệ mất mạng: toàn bộ kịch bản demo phát lại được từ file SQLite mang
+theo.
+
+\subsection{Cache kết quả tìm kiếm}
+\label{sec:ky-thuat-cache}
+
+Trong phát triển và đánh giá, cùng một truy vấn tìm kiếm bị gọi lặp lại rất
+nhiều; gọi API thật vừa tốn chi phí vừa làm eval dao động (kết quả web thay
+đổi giữa hai lần chạy). Công cụ \texttt{web\_search} có lớp cache in-process
+bật bằng biến môi trường (\texttt{LAPLACE\_SEARCH\_CACHE=1}): khóa cache là
+truy vấn đã \emph{chuẩn hóa} (casefold + gộp khoảng trắng --- ``FastAPI~~VS
+Flask'' và ``fastapi vs flask'' dùng chung một entry) kèm số kết quả; TTL mặc
+định 3600 giây; trần 256 entry với chính sách loại bỏ entry cũ nhất. Cache
+làm quan sát ổn định giữa các lượt chạy eval (cùng input $\to$ cùng
+observation) và giảm chi phí API trong quá trình phát triển.

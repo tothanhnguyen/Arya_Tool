@@ -1,4 +1,4 @@
-\section{Vấn đề}
+\section{Đặt vấn đề và mục tiêu}
 \label{sec:van-de}
 
 \subsection{Bối cảnh}
@@ -8,7 +8,7 @@ ghép với khả năng gọi công cụ (tool calling), chúng có thể \emph{
 tìm kiếm thông tin, đọc trang web, ghi dữ liệu, lên lịch --- thay vì chỉ sinh
 văn bản. Lớp hệ thống này thường được gọi là \emph{AI agent}: LLM đóng vai trò
 bộ điều khiển, quyết định bước tiếp theo dựa trên yêu cầu của người dùng và
-quan sát thu được từ môi trường~\cite{yao2023react}.
+quan sát thu được từ môi trường~\cite{yao2023react,wang2024agentsurvey}.
 
 Tuy nhiên, khoảng cách giữa một bản demo agent và một hệ thống dùng được hằng
 ngày là rất lớn. Ba vấn đề nổi bật:
@@ -17,8 +17,8 @@ ngày là rất lớn. Ba vấn đề nổi bật:
   \item \textbf{Độ tin cậy.} LLM không tất định và có thể ``ảo giác'': chọn sai
         công cụ, bịa tên công cụ không tồn tại, lặp vô hạn, hoặc thực hiện hành
         động có hại (xóa dữ liệu) mà người dùng không hay biết. Một agent hữu
-        dụng phải có các lớp chặn tường minh: giới hạn số bước, timeout, xác
-        nhận của con người trước hành động ghi/xóa.
+        dụng phải có các lớp chặn tường minh: giới hạn số bước, timeout, trần
+        chi phí, xác nhận của con người trước hành động ghi/xóa.
   \item \textbf{Khả năng quan sát.} Khi agent trả lời sai hoặc hành xử lạ, câu
         hỏi ``nó vừa làm gì và vì sao'' phải trả lời được. Đa số demo agent chỉ
         ghi log rời rạc; việc dựng lại toàn bộ chuỗi quyết định (prompt nào,
@@ -30,22 +30,24 @@ ngày là rất lớn. Ba vấn đề nổi bật:
         hay xấu đi.
 \end{enumerate}
 
-\subsection{Bài toán}
+\subsection{Bài toán và mục tiêu}
 
 Đồ án đặt bài toán: xây dựng một \textbf{AI agent cá nhân} giao tiếp qua
 Telegram, tự thực hiện trọn vẹn vòng lặp \emph{nhận yêu cầu $\to$ phân tích
 $\to$ lập kế hoạch $\to$ gọi công cụ $\to$ quan sát $\to$ điều chỉnh $\to$ trả
 lời} trên một bộ công cụ thực dụng (tìm kiếm web, đọc trang, ghi chú, việc cần
-làm, viết báo cáo, lên lịch định kỳ), với ba yêu cầu xuyên suốt tương ứng ba
+làm, viết báo cáo, lên lịch định kỳ), với ba mục tiêu xuyên suốt tương ứng ba
 vấn đề trên:
 
 \begin{itemize}
-  \item \textbf{An toàn theo lớp}: giới hạn bước và timeout ở mọi tầng; hành
-        động ghi/xóa phải qua xác nhận người dùng (human-in-the-loop) với cơ
-        chế tạm dừng/tiếp tục bền vững qua restart.
+  \item \textbf{An toàn theo lớp}: giới hạn bước và timeout ở mọi tầng; trần
+        chi phí LLM cho mỗi lần chạy tác vụ; hành động ghi/xóa phải qua xác
+        nhận người dùng (human-in-the-loop) với cơ chế tạm dừng/tiếp tục bền
+        vững qua restart.
   \item \textbf{Trace là công dân hạng nhất}: mọi lệnh gọi LLM và mọi lần chạy
         công cụ đều được ghi vào cơ sở dữ liệu; một trace viewer dựng lại được
-        toàn bộ timeline kèm token, chi phí, độ trễ.
+        toàn bộ timeline kèm token, chi phí, độ trễ, và phát lại được
+        (replay) khi không có mạng.
   \item \textbf{Đánh giá tự động}: một eval harness chạy bộ test case cố định
         qua chính agent loop production, chấm tự động và xuất bảng metric ---
         làm nền cho thí nghiệm so sánh chiến lược và mô hình.
@@ -73,10 +75,15 @@ hạ tầng phân tán.
   \item Cơ chế human-in-the-loop \textbf{bền vững}: trạng thái tạm dừng lưu
         trong DB, tiếp tục được ở tiến trình khác, chống thực thi kép bằng
         compare-and-set;
-  \item Hệ thống trace đầy đủ + trace viewer, dùng chung một nguồn dữ liệu cho
-        cả gỡ lỗi lẫn đánh giá;
-  \item Eval harness với 37 test case thuộc 8 nhóm (bao gồm cả prompt
-        injection và phục hồi lỗi), 9 metric, tùy chọn
+  \item Hệ thống trace đầy đủ + trace viewer có chế độ phát lại, dùng chung
+        một nguồn dữ liệu cho cả gỡ lỗi lẫn đánh giá;
+  \item Một tập kỹ thuật tăng độ tin cậy được cài đặt và đo được
+        (Mục~\ref{sec:ky-thuat}): chống prompt injection nhiều lớp, phân loại
+        lỗi công cụ kèm chính sách retry, rate limit theo người dùng,
+        self-correction có đếm qua trace, theo dõi chi phí + trần chi phí mỗi
+        tác vụ, streaming tiến độ, replay trace, cache tìm kiếm;
+  \item Eval harness với \textbf{66 test case} thuộc 8 nhóm (bao gồm cả prompt
+        injection và phục hồi lỗi), 8 metric, tùy chọn
         LLM-as-judge~\cite{zheng2023judge}; và thí nghiệm so sánh
         $2 \times 2$ (chiến lược $\times$ mô hình).
 \end{enumerate}

@@ -1,0 +1,75 @@
+\section{Giới hạn và hướng phát triển}
+\label{sec:gioi-han}
+
+\subsection{Giới hạn}
+
+\begin{itemize}
+  \item \textbf{Phạm vi kênh và hạ tầng}: chỉ hỗ trợ Telegram; một tiến trình,
+        SQLite, scheduler in-process --- phù hợp quy mô cá nhân, chưa phân tán.
+        Agent loop đồng bộ chiếm một thread cho mỗi tác vụ đang chạy.
+  \item \textbf{Bảo mật}: REST API mới bảo vệ bằng một API key đơn (header),
+        chưa có auth thật; định danh người dùng dựa vào Telegram.
+  \item \textbf{Chống prompt injection ở mức giảm thiểu}: đóng khung dữ liệu,
+        vô hiệu hóa delimiter giả, quy tắc trong system prompt, xác nhận người
+        dùng --- không có bảo đảm tuyệt đối trước tấn công tinh vi hơn (bài
+        toán mở của cả lĩnh vực~\cite{greshake2023injection}).
+  \item \textbf{Trần chi phí theo chặng chạy}: trần 0{,}25~USD áp cho từng
+        chặng run/resume, không cộng dồn qua các lần tạm dừng chờ xác nhận ---
+        một tác vụ nhiều lần confirm có thể tốn hơn trần danh nghĩa (tổng chi
+        phí thật vẫn tra được qua \texttt{task\_usage}).
+  \item \textbf{Rate limit và cache in-memory}: trạng thái rate limiter và
+        search cache nằm trong RAM của tiến trình --- restart là reset; cache
+        tìm kiếm khớp theo truy vấn chuẩn hóa (exact-match), chưa phải
+        semantic cache theo nghĩa embedding.
+  \item \textbf{Memory dài hạn}: mới dừng ở hồ sơ người dùng dạng JSON, agent
+        chưa khai thác; chưa có vector memory/RAG.
+  \item \textbf{Giới hạn kỹ thuật}: timeout không kill được thread công cụ
+        đang chạy (giới hạn Python) --- thread cũ được bỏ lại có kiểm soát.
+  \item \textbf{Đánh giá}: LLM-as-judge mới chấm pass/fail theo tiêu chí từng
+        case, chưa có thang điểm nhiều mức và chưa kiểm chứng chéo tay trên
+        mẫu lớn; bộ 66 case chưa phủ hết không gian hành vi; số lượt lặp
+        $n=2$/cấu hình (do quota free tier) là nhỏ so với mức $n \geq 3$
+        mong muốn cho hệ thống không tất định, nên khác biệt nhỏ giữa các cấu
+        hình cần diễn giải thận trọng.
+        \todo{bo sung gioi han rut ra tu so lieu exp-final: variance giua
+        cac run, nhom case yeu nhat}
+\end{itemize}
+
+\subsection{Hướng phát triển}
+
+\begin{itemize}
+  \item Mở rộng kênh (web chat/Slack) trên cùng lõi agent; PostgreSQL và
+        scheduler phân tán khi cần đa máy; tách worker + queue để bỏ giới hạn
+        một thread/tác vụ.
+  \item Memory dài hạn có cấu trúc + RAG cho tri thức cá nhân.
+  \item Phòng thủ injection nhiều lớp hơn (bộ lọc đầu ra công cụ, sandbox
+        quyền theo từng tác vụ); trần chi phí cộng dồn theo cả vòng đời tác
+        vụ.
+  \item Chuẩn hóa tool interface theo hướng Model Context Protocol (MCP) để
+        dùng lại hệ sinh thái công cụ bên ngoài.
+  \item Mở rộng eval: thêm case đối kháng, tăng số lượt lặp, thang điểm judge
+        nhiều mức có kiểm chứng người, đo chi phí--chất lượng theo Pareto để
+        chọn model.
+\end{itemize}
+
+\section*{Kết luận}
+\addcontentsline{toc}{section}{Kết luận}
+
+Đồ án xây dựng Laplace's Demon --- một AI agent cá nhân hoàn chỉnh từ kênh
+giao tiếp (Telegram) đến lõi điều phối (state machine tự xây với hai chiến
+lược ReAct và Plan-and-Execute cắm chung một interface), với ba trụ cột thiết
+kế được hiện thực hóa nhất quán: an toàn theo lớp (giới hạn bước/timeout,
+xác nhận người dùng bền vững qua restart, trần chi phí, rate limit, chống
+prompt injection nhiều lớp), khả năng quan sát (mọi lệnh gọi LLM và mọi lần
+chạy công cụ đều có trace; trace viewer kèm chi phí và chế độ phát lại
+offline), và đánh giá định lượng (eval harness 66 case, 8 metric, chạy đúng
+agent loop production, tùy chọn LLM-as-judge). Thí nghiệm ma trận
+$2 \times 2$ cho thấy \todo{1--2 cau ket qua chinh + cau hinh mac dinh duoc
+chon, dien tu evals/results/exp-final}.
+
+Bài học lớn nhất của đồ án nằm ở phương pháp: khi trace là công dân hạng
+nhất và bộ eval lặp lại được, mọi thay đổi --- từ sửa prompt đến đổi chiến
+lược hay model --- đều trở thành một thí nghiệm có số liệu thay vì một cảm
+nhận; chính vòng phản hồi này (eval phát hiện model bịa tên công cụ $\to$
+sửa prompt $\to$ eval xác nhận cải thiện) đã định hình phần lớn các kỹ thuật
+ở Mục~\ref{sec:ky-thuat}.

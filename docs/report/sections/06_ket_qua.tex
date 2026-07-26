@@ -1,0 +1,97 @@
+\section{Kết quả thực nghiệm}
+\label{sec:ket-qua}
+
+% ============================================================
+% KHUNG KET QUA — moi cho \todo{...} dien tu evals/results/exp-final
+% (summary trong report.md / results.json; bieu do metrics_grid.png).
+% ============================================================
+
+\subsection{Bảng tổng hợp}
+
+\begin{table}[ht]
+\centering
+\caption{So sánh 4 cấu hình (chiến lược $\times$ mô hình), trung bình trên
+66 case $\times$ $n=2$ lượt. \todo{dien so lieu tu evals/results/exp-final}}
+\label{tab:ket-qua-tong-hop}
+\begin{tabular}{lcccc}
+\toprule
+Metric & \multicolumn{2}{c}{Mock (heuristic)} & \multicolumn{2}{c}{Gemini} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & ReAct & Plan-Exec & ReAct & Plan-Exec \\
+\midrule
+Success rate (\%)             & --- & --- & --- & --- \\
+Route accuracy (\%)           & --- & --- & --- & --- \\
+Tool-selection accuracy (\%)  & --- & --- & --- & --- \\
+Recovery rate (\%)            & --- & --- & --- & --- \\
+Judge pass rate (\%)          & --- & --- & --- & --- \\
+Số bước trung bình            & --- & --- & --- & --- \\
+Số lệnh gọi LLM trung bình    & --- & --- & --- & --- \\
+Token trung bình / tác vụ     & --- & --- & --- & --- \\
+Chi phí trung bình / tác vụ (USD) & --- & --- & --- & --- \\
+Thời gian chạy trung bình (s) & --- & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% Bieu do tong hop: copy evals/results/exp-final/metrics_grid.png vao
+% docs/report/figures/ roi mo comment khoi duoi.
+% \begin{figure}[ht]\centering
+%   \includegraphics[width=\linewidth]{metrics_grid}
+%   \caption{So sánh các metric giữa 4 cấu hình.
+%     \todo{copy metrics_grid.png tu evals/results/exp-final vao figures/}}
+%   \label{fig:metrics-grid}
+% \end{figure}
+
+\subsection{Phân tích theo nhóm case}
+
+\begin{table}[ht]
+\centering
+\caption{Success rate theo 8 nhóm case (cấu hình Gemini).
+\todo{dien so lieu theo nhom tu evals/results/exp-final}}
+\label{tab:ket-qua-theo-nhom}
+\begin{tabular}{lcc}
+\toprule
+Nhóm case & ReAct (\%) & Plan-Exec (\%) \\
+\midrule
+Trả lời trực tiếp / hỏi lại & --- & --- \\
+Một công cụ                 & --- & --- \\
+Nhiều bước                  & --- & --- \\
+Xác nhận (HITL)             & --- & --- \\
+Phục hồi lỗi                & --- & --- \\
+Prompt injection            & --- & --- \\
+Đường lỗi                   & --- & --- \\
+Tiếng Việt / UX             & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\todo{nhan xet 2--3 cau: nhom nao kho nhat (du kien: multi-step + recovery),
+injection co case nao bi vuot khong}
+
+\subsection{Self-correction}
+
+\todo{dien tu trace exp-final: tong so lan goi purpose :fixN theo cau hinh,
+ty le task can it nhat 1 lan tu sua, va nhan xet model nao vung schema hon}
+
+\subsection{Phân tích theo câu hỏi nghiên cứu}
+
+\paragraph{RQ1 (chiến lược).}
+\todo{doi chieu Bang~\ref{tab:ket-qua-tong-hop}: chien luoc nao thanh cong
+cao hon, chenh lech cost/latency/so buoc; co dung gia thuyet Plan-Execute re
+va doan duoc chi phi hon, ReAct phuc hoi tot hon khong}
+
+\paragraph{RQ2 (mô hình).}
+\todo{Gemini hon/kem mock heuristic o nhom nao; luu y o mock chi o trung
+chien luoc goc co y nghia so lieu (Muc~\ref{sec:thuc-nghiem}); co tuong tac
+chien luoc x mo hinh khong}
+
+\paragraph{RQ3 (chống chịu).}
+\todo{recovery rate + ket qua nhom injection: bao nhieu case injection bi
+vuot, lop phong thu nao chan duoc (delimiter / forbid\_tools / confirm)}
+
+\subsection{Case study}
+
+\todo{ke lai 1--2 trace tieu bieu tu trace viewer cua lan chay exp-final:
+(1) mot task nhieu buoc thanh cong — timeline cac buoc, so token, chi phi;
+(2) mot task phuc hoi loi hoac tu choi confirm thu vi — agent doi huong the
+nao. Kem anh chup man hinh trace viewer/replay neu can.}

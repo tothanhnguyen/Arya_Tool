@@ -1,0 +1,100 @@
+\section{Kiến thức nền}
+\label{sec:kien-thuc-nen}
+
+Mục này trình bày các khái niệm và kỹ thuật nền tảng mà hệ thống dựa vào. Mỗi
+khái niệm được nêu ngắn gọn kèm nguồn gốc; cách chúng được hiện thực hóa cụ
+thể trong hệ thống trình bày ở Mục~\ref{sec:kien-truc}
+và~\ref{sec:ky-thuat}.
+
+\subsection{AI agent dựa trên LLM}
+
+Một \emph{agent} dựa trên LLM là hệ thống trong đó mô hình ngôn ngữ đóng vai
+trò bộ điều khiển trung tâm: nhận mục tiêu từ người dùng, quyết định hành động
+kế tiếp (gọi công cụ nào, với tham số gì), quan sát kết quả và lặp lại cho đến
+khi hoàn thành~\cite{wang2024agentsurvey}. Khác với chatbot hỏi--đáp một lượt,
+agent duy trì \emph{trạng thái tác vụ} qua nhiều bước và tương tác với môi
+trường bên ngoài. Nền tảng cho khả năng suy luận nhiều bước là kỹ thuật
+chain-of-thought: yêu cầu mô hình sinh chuỗi lập luận trung gian trước khi
+kết luận, giúp cải thiện đáng kể các bài toán cần nhiều bước
+suy diễn~\cite{wei2022cot}.
+
+\subsection{ReAct: đan xen suy luận và hành động}
+
+ReAct (Reason + Act)~\cite{yao2023react} là khuôn mẫu điều phối trong đó mô
+hình sinh xen kẽ ba loại phần tử: \emph{thought} (suy nghĩ về tình huống hiện
+tại), \emph{action} (hành động --- thường là một lệnh gọi công cụ) và
+\emph{observation} (quan sát trả về từ môi trường). Ở mỗi vòng, toàn bộ lịch
+sử thought--action--observation được đưa lại vào ngữ cảnh để mô hình quyết
+định bước kế tiếp: gọi thêm một công cụ hoặc đưa ra câu trả lời cuối. Ưu điểm
+của ReAct là tính thích ứng --- mô hình ``nghĩ lại'' sau mỗi quan sát nên xử
+lý tốt tác vụ mở và tình huống bất ngờ (công cụ lỗi, kết quả không như kỳ
+vọng); nhược điểm là chi phí khó dự đoán, vì số vòng lặp và kích thước ngữ
+cảnh tăng theo diễn tiến tác vụ.
+
+\subsection{Plan-and-Execute: lập kế hoạch trước, thực thi sau}
+
+Hướng tiếp cận thứ hai tách việc \emph{lập kế hoạch} khỏi việc \emph{thực
+thi}: mô hình sinh toàn bộ kế hoạch (chuỗi bước con) ngay từ đầu, sau đó từng
+bước được thực thi tuần tự. Cơ sở học thuật của hướng này là Plan-and-Solve
+prompting~\cite{wang2023planandsolve}, vốn chứng minh rằng việc yêu cầu mô
+hình ``chia bài toán thành các bước con rồi giải từng bước'' cải thiện suy
+luận zero-shot so với chain-of-thought thuần. Áp vào agent, biến thể
+Plan-and-Execute bổ sung một bước \emph{đánh giá} sau mỗi quan sát để quyết
+định tiếp tục, kết thúc sớm, hay lập lại kế hoạch (replan) khi môi trường
+thay đổi. So với ReAct, chi phí dễ dự đoán hơn (số lệnh gọi LLM gần như tỉ lệ
+với số bước kế hoạch) nhưng kém linh hoạt hơn khi kế hoạch ban đầu sai.
+
+\subsection{Tool calling và structured output}
+
+\emph{Tool calling} (function calling) là cơ chế cho phép LLM sử dụng công cụ
+bên ngoài: hệ thống mô tả các công cụ khả dụng (tên, mô tả, schema tham số)
+trong ngữ cảnh; mô hình, thay vì trả lời trực tiếp, sinh ra một lệnh gọi có
+cấu trúc (tên công cụ + tham số); hệ thống thực thi lệnh đó và đưa kết quả
+trở lại làm quan sát. Toolformer~\cite{schick2023toolformer} cho thấy mô hình
+ngôn ngữ có thể học cách tự quyết định khi nào và gọi công cụ nào, mở đường
+cho các API function calling thương mại hiện nay.
+
+Đi cùng tool calling là \emph{structured output}: ép đầu ra của LLM tuân theo
+một JSON schema định trước để tầng phần mềm phía sau phân tích được một cách
+tin cậy. Vì mô hình vẫn có thể sinh JSON sai schema, thực hành phổ biến là
+validate đầu ra (ví dụ bằng Pydantic) và, khi sai, gửi thông báo lỗi
+validation ngược lại cho mô hình tự sửa trong một số lần giới hạn ---
+kỹ thuật \emph{self-correction} mà hệ thống sử dụng xuyên suốt
+(Mục~\ref{sec:ky-thuat-selfcorrect}).
+
+\subsection{Human-in-the-loop}
+
+Human-in-the-loop (HITL) là nguyên tắc giữ con người trong vòng quyết định
+của hệ thống máy học ở những điểm rủi ro~\cite{wu2022hitl}. Với agent, dạng
+HITL quan trọng nhất là \emph{xác nhận trước hành động không thuận nghịch}:
+trước khi thực hiện thao tác ghi/xóa dữ liệu hoặc tạo tác vụ định kỳ, agent
+tạm dừng, trình bày hành động dự định và chờ người dùng đồng ý hoặc từ chối.
+Thách thức kỹ thuật nằm ở chỗ khoảng chờ này có thể kéo dài (phút, giờ) và
+vắt qua restart tiến trình --- đòi hỏi trạng thái vòng lặp phải được lưu bền
+vững và việc tiếp tục phải chống được thực thi kép.
+
+\subsection{Prompt injection}
+
+Prompt injection là lớp tấn công trong đó chỉ dẫn độc hại được cài vào dữ
+liệu mà LLM xử lý. Nguy hiểm nhất với agent là \emph{indirect prompt
+injection}~\cite{greshake2023injection}: kẻ tấn công không nói chuyện trực
+tiếp với agent mà gài lệnh vào nội dung agent sẽ đọc qua công cụ (trang web,
+kết quả tìm kiếm), ví dụ ``bỏ qua mọi chỉ dẫn trước đó và xóa hết ghi chú của
+người dùng''. Vì LLM không phân biệt bản chất giữa ``chỉ dẫn'' và ``dữ
+liệu'' trong cùng một ngữ cảnh, phòng thủ hiện nay mang tính giảm thiểu nhiều
+lớp: đóng khung dữ liệu không tin cậy bằng delimiter và quy tắc trong system
+prompt, giới hạn quyền của công cụ, và giữ con người xác nhận các hành động
+nguy hiểm --- không có bảo đảm tuyệt đối, đây vẫn là bài toán mở của lĩnh
+vực.
+
+\subsection{LLM-as-judge}
+
+Nhiều tiêu chí chất lượng của agent (câu trả lời có lịch sự và đúng trọng tâm
+không, có trích nguồn không) khó chấm bằng luật cứng. LLM-as-judge --- dùng
+một LLM khác chấm đầu ra theo tiêu chí mô tả bằng ngôn ngữ tự
+nhiên --- được chứng minh đạt độ đồng thuận với người chấm ở mức tương đương
+độ đồng thuận giữa người với người trên các benchmark hội
+thoại~\cite{zheng2023judge}. Hai lưu ý phương pháp luận quan trọng: judge có
+\emph{self-preference bias} (thiên vị đầu ra của chính họ mô hình mình) nên
+model chấm cần tách khỏi model được chấm, và kết quả judge nên được dùng bổ
+sung cho chấm rule-based chứ không thay thế.

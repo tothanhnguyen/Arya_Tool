@@ -1,0 +1,176 @@
+\section{Kiến trúc hệ thống}
+\label{sec:kien-truc}
+
+\subsection{Tổng quan hệ thống}
+
+Hệ thống chạy trong \textbf{một tiến trình} (\texttt{python -m laplace}) gồm ba
+mặt tiền cùng trỏ về một lõi agent: (i)~bot Telegram (aiogram, long polling);
+(ii)~REST API + trace viewer (FastAPI/uvicorn); (iii)~scheduler chạy tác vụ
+định kỳ (APScheduler). Lõi agent là hàm \emph{đồng bộ} --- các mặt tiền bất
+đồng bộ gọi vào qua thread pool --- nhờ đó logic điều phối dễ suy luận và test,
+còn I/O vẫn không chặn nhau.
+
+% PLACEHOLDER hinh: xuat so do thanh phan (Mermaid trong docs/KIEN_TRUC.md)
+% ra PNG/PDF roi tha vao figures/, vd:
+% \begin{figure}[ht]\centering
+%   \includegraphics[width=.9\linewidth]{components}
+%   \caption{Sơ đồ thành phần hệ thống.}\label{fig:components}
+% \end{figure}
+
+Bốn nguyên tắc thiết kế xuyên suốt:
+
+\begin{enumerate}
+  \item \textbf{Tự xây agent loop}, không dùng framework agent: vòng lặp là một
+        state machine tường minh ($\sim$500 dòng lõi), giải thích và kiểm soát
+        được từng chuyển trạng thái.
+  \item \textbf{Mọi thứ đều có trace}: mỗi lệnh gọi LLM và mỗi lần chạy công cụ
+        ghi vào DB ngay khi xảy ra.
+  \item \textbf{An toàn theo lớp}: giới hạn bước, timeout công cụ/tác vụ, trần
+        chi phí, xác nhận người dùng, cách ly dữ liệu theo người dùng.
+  \item \textbf{Chạy được ở mọi cấp độ khóa API}: không có key nào hệ thống vẫn
+        chạy (mock LLM + stub search); thêm key nào mở khóa tính năng đó.
+\end{enumerate}
+
+\subsection{Agent loop --- state machine}
+\label{sec:agent-loop}
+
+Một tác vụ đi qua các trạng thái:
+\texttt{pending} $\to$ \texttt{running} $\to$ (\texttt{awaiting\_confirm}
+$\rightleftarrows$ \texttt{running}) $\to$ \texttt{done} $\mid$
+\texttt{failed}. Bước đầu tiên là \emph{phân loại} (classify): LLM gán yêu cầu
+vào một trong bốn tuyến --- trả lời trực tiếp, hỏi lại cho rõ, một công cụ, hay
+nhiều bước --- rồi tuyến nhiều bước được giao cho một trong hai chiến lược:
+
+\begin{itemize}
+  \item \textbf{ReAct}~\cite{yao2023react}: mỗi vòng, LLM nhìn toàn bộ lịch sử
+        (suy nghĩ, hành động, quan sát) và chọn: gọi một công cụ \emph{hoặc}
+        đưa câu trả lời cuối. Thích ứng tốt với tác vụ mở; chi phí khó đoán.
+        Khi người dùng từ chối xác nhận, quan sát ``user rejected'' được đưa
+        vào lịch sử để LLM xoay phương án khác.
+  \item \textbf{Plan-and-Execute}~\cite{wang2023planandsolve}: LLM sinh toàn bộ
+        kế hoạch trước, thực thi tuần tự; sau mỗi quan sát, một bước
+        \emph{evaluate} quyết định \texttt{done}/\texttt{continue}/%
+        \texttt{replan}/\texttt{fail} (tối đa 2 lần replan). Chi phí dễ đoán;
+        cứng nhắc hơn khi môi trường thay đổi.
+\end{itemize}
+
+Hai chiến lược cài chung interface \texttt{AgentStrategy \{run, resume\}} ---
+đây là nền cho thí nghiệm so sánh ở Mục~\ref{sec:thuc-nghiem}.
+
+\textbf{Structured output.} Mọi quyết định của LLM (classify, chọn hành động,
+lập kế hoạch, evaluate) bị ép trả JSON theo schema Pydantic
+(\texttt{RouteDecision}, \texttt{ReActAction}, \texttt{Plan},
+\texttt{Verdict}). Sai schema thì kích hoạt cơ chế self-correction
+(Mục~\ref{sec:ky-thuat-selfcorrect}); vẫn sai sau số lần giới hạn thì tác vụ
+\texttt{failed} với lỗi nêu rõ. Mọi lần gọi, kể cả retry, đều được ghi trace.
+
+\subsection{Human-in-the-loop bền vững}
+\label{sec:hitl}
+
+Trước khi chạy công cụ, orchestrator hỏi \texttt{needs\_confirm(params)} ---
+cờ tĩnh (công cụ \texttt{scheduler} luôn hỏi) hoặc động theo tham số
+(\texttt{note\_store} chỉ hỏi khi update/delete). Nếu cần xác nhận: toàn bộ
+trạng thái vòng lặp (công cụ đang chờ, lịch sử, kế hoạch, con trỏ) được lưu
+vào DB, tác vụ chuyển \texttt{awaiting\_confirm}, hàm trả về; bot gửi nút
+đồng ý/từ chối. Khi người dùng bấm nút, \texttt{resume\_task} \emph{giành
+quyền} bằng compare-and-set trên trạng thái (\texttt{UPDATE \dots\ WHERE
+status='awaiting\_confirm'}) --- hai request xác nhận đua nhau thì chỉ một
+thắng, công cụ không bao giờ chạy hai lần --- rồi khôi phục trạng thái và chạy
+tiếp đúng chỗ dừng, kể cả ở tiến trình khác sau nhiều giờ.
+
+\subsection{Tool registry và executor}
+\label{sec:tool-registry}
+
+Công cụ đăng ký bằng decorator kèm schema tham số Pydantic; registry tự sinh
+spec JSON đưa vào prompt --- thêm công cụ mới không phải sửa agent loop hay
+prompt. Executor bọc mọi công cụ: validate tham số, retry theo phân loại lỗi
+(Mục~\ref{sec:ky-thuat-taxonomy}), timeout cứng (chạy trong worker thread), và
+\emph{không bao giờ} để exception lọt ra agent loop --- lỗi công cụ trở thành
+quan sát để LLM tự điều chỉnh. Mọi công cụ đọc/ghi DB đều lọc theo
+\texttt{user\_id} từ \texttt{ToolContext}: người dùng này không đọc/sửa được
+dữ liệu người dùng khác. Sáu công cụ MVP: \texttt{web\_search},
+\texttt{fetch\_page}, \texttt{note\_store}, \texttt{task\_list},
+\texttt{report\_builder}, \texttt{scheduler}.
+
+\subsection{Lớp LLM}
+\label{sec:llm-layer}
+
+Một protocol duy nhất \texttt{LLMProvider.complete(messages, json\_schema)}
+với ba hiện thực: (i)~\textbf{MockLLM} --- chế độ scripted (test/eval điều
+khiển chính xác từng bước) và heuristic (chạy dev không cần key);
+(ii)~\textbf{OpenAIProvider} --- adapter cho mọi API tương thích OpenAI
+chat.completions, ghi token/chi phí/độ trễ vào trace;
+(iii)~\textbf{Gemini} dùng lại chính OpenAIProvider qua endpoint tương thích
+OpenAI của Google, thêm hai thích ứng: tự retry theo gợi ý thời gian chờ khi
+gặp 429 (quota free tier, tối đa 5 lần với backoff tăng dần), và bỏ
+\texttt{response\_format} khi backend từ chối, dựa vào schema nhúng trong
+system prompt + validate ở tầng trên. Đổi mô hình/nhà cung cấp chỉ là đổi
+biến môi trường --- nền tảng cho thí nghiệm so sánh mô hình. Ở chế độ chạy
+thật, provider còn được bọc thêm một lớp trần chi phí mỗi tác vụ
+(Mục~\ref{sec:ky-thuat-cost}).
+
+\subsection{Lưu trữ và trace}
+\label{sec:trace-store}
+
+SQLite (WAL, busy timeout) với ba bảng trung tâm cho khả năng quan sát:
+\texttt{tasks} (trạng thái + state JSON khi tạm dừng), \texttt{steps} (mỗi lần
+chạy công cụ: tham số, quan sát, trạng thái, độ trễ, retry) và
+\texttt{llm\_calls} (mỗi lệnh gọi LLM: mục đích, model, token, chi phí, độ
+trễ). Ba bảng này là \emph{nguồn dữ liệu duy nhất} cho cả trace viewer lẫn
+eval harness --- đánh giá không cần instrument thêm gì. Trace viewer hiển thị
+danh sách tác vụ (kèm cột token/chi phí và dòng tổng toàn hệ thống), trang
+chi tiết theo timeline từng bước, và chế độ phát lại
+(Mục~\ref{sec:ky-thuat-replay}). Triển khai bằng Docker Compose: một
+container, healthcheck HTTP, SQLite và báo cáo markdown nằm trên volume để
+sống qua restart.
+
+\subsection{Luồng dữ liệu điển hình}
+\label{sec:data-flow}
+
+Ghép các thành phần trên, một yêu cầu nhiều bước có xác nhận đi qua hệ thống
+như sau:
+
+\begin{enumerate}
+  \item Người dùng nhắn tin Telegram; handler của bot kiểm tra rate limit
+        (Mục~\ref{sec:ky-thuat-ratelimit}) và độ dài đầu vào, tạo bản ghi
+        \texttt{tasks}, rồi gọi \texttt{run\_task} trên worker thread.
+  \item \texttt{run\_task} nạp ngữ cảnh hội thoại, gọi LLM \emph{classify} để
+        chọn tuyến; tuyến nhiều bước được giao cho chiến lược đang cấu hình
+        (ReAct hoặc Plan-and-Execute).
+  \item Chiến lược lần lượt gọi LLM quyết định hành động và giao công cụ cho
+        executor; mỗi lệnh gọi LLM ghi một dòng \texttt{llm\_calls}, mỗi lần
+        chạy công cụ ghi một dòng \texttt{steps}. Kết quả công cụ được đóng
+        khung \texttt{<tool\_output>} trước khi đưa lại vào prompt
+        (Mục~\ref{sec:ky-thuat-injection}).
+  \item Trong lúc chạy, một wrapper quanh provider phát sự kiện tiến độ để bot
+        cập nhật ``đang tìm kiếm\dots/đang tổng hợp\dots'' lên đúng một
+        message trạng thái (Mục~\ref{sec:ky-thuat-streaming}).
+  \item Gặp công cụ cần xác nhận: trạng thái vòng lặp lưu vào
+        \texttt{tasks.state\_json}, bot gửi nút đồng ý/từ chối; người dùng bấm
+        nút thì \texttt{resume\_task} tiếp tục đúng chỗ dừng
+        (Mục~\ref{sec:hitl}).
+  \item Kết thúc (thành công hoặc thất bại có lý do), bot thay message trạng
+        thái bằng câu trả lời cuối; toàn bộ timeline xem lại được trên trace
+        viewer.
+\end{enumerate}
+
+Tác vụ định kỳ đi cùng một đường: đến giờ cron, scheduler tạo task và chạy
+qua đúng vòng lặp trên, kết quả (kèm tiến độ streaming) được đẩy về đúng chat
+Telegram của chủ job. Eval harness (Mục~\ref{sec:eval-harness}) cũng gọi đúng
+\texttt{run\_task}/\texttt{resume\_task} --- không có đường tắt riêng.
+
+\subsection{Eval harness}
+\label{sec:eval-harness}
+
+Bộ đánh giá chạy \textbf{66 test case} YAML (18 file, 8 nhóm: trả lời trực
+tiếp/hỏi lại, một công cụ, nhiều bước, xác nhận, phục hồi lỗi, prompt
+injection, đường lỗi, tiếng Việt/UX) qua \emph{chính agent loop production}
+--- không có đường tắt riêng cho eval. Mỗi lượt chạy dùng một DB SQLite mới
+tinh; case có thể mồi dữ liệu (\texttt{seed}), giả lập công cụ hỏng
+(\texttt{patch\_tools}), và kịch bản bấm nút xác nhận. Chấm rule-based theo kỳ
+vọng khai báo (trạng thái, tuyến, tập công cụ, công cụ bị cấm, chuỗi phải có
+trong trả lời), tùy chọn thêm LLM-as-judge~\cite{zheng2023judge} với model
+chấm tách khỏi model agent. Kết quả tổng hợp thành 8 metric
+(Mục~\ref{sec:metric}) xuất ra JSON và báo cáo markdown. Cùng một bộ case
+chạy được cả chế độ mock (deterministic, offline, làm regression test) lẫn
+LLM thật (đo số liệu thực nghiệm).
