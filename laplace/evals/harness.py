@@ -247,6 +247,9 @@ def run_case(
         "error": error,
         "steps": trace["totals"]["steps"] if trace else 0,
         "llm_calls": len(trace["llm_calls"]) if trace else 0,
+        # So lan self-correction (T8): retry LLM mang purpose "<purpose>:fixN"
+        "self_corrections": sum(1 for c in trace["llm_calls"] if ":fix" in c["purpose"])
+        if trace else 0,
         "tokens": (trace["totals"]["prompt_tokens"] + trace["totals"]["completion_tokens"])
         if trace else 0,
         "prompt_tokens": trace["totals"]["prompt_tokens"] if trace else 0,
@@ -275,6 +278,9 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if recovery else None,
         "avg_steps": round(statistics.mean(r["steps"] for r in rows), 2) if rows else None,
         "avg_llm_calls": round(statistics.mean(r["llm_calls"] for r in rows), 2)
+        if rows else None,
+        "avg_self_corrections": round(
+            statistics.mean(r.get("self_corrections", 0) for r in rows), 3)
         if rows else None,
         "avg_tokens": round(statistics.mean(r["tokens"] for r in rows), 1) if rows else None,
         "avg_cost_usd": round(statistics.mean(r["cost_usd"] for r in rows), 6)
@@ -311,7 +317,7 @@ def _write_report(out: Path, meta: dict, rows: list[dict], summary: dict) -> Non
     ]
     for key in ("success_rate", "route_accuracy", "tool_selection_accuracy",
                 "judge_pass_rate", "recovery_rate", "avg_steps", "avg_llm_calls",
-                "avg_tokens", "avg_cost_usd", "avg_duration_s"):
+                "avg_self_corrections", "avg_tokens", "avg_cost_usd", "avg_duration_s"):
         lines.append(f"| {key} | {summary[key]} |")
     header = (
         "| Case | Run | Strategy | Status | Pass | Judge | Checks lỗi | Steps |"
