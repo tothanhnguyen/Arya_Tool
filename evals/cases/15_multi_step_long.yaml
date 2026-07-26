@@ -1,0 +1,117 @@
+# Nhom 15: chuoi nhieu buoc DAI (4+ buoc tool) — pipeline nghien cuu, tong hop
+# seed data, plan_execute 5 buoc, va recovery giua chung. max_steps=8 nen moi
+# chuoi giu <= 5 buoc tool de con cho cho final answer.
+cases:
+  - id: long_research_note_report_react
+    tags: [multi_step, long]
+    request: "Tìm hiểu RAG (Retrieval-Augmented Generation) là gì và ứng dụng thực tế, lưu một ghi chú tóm tắt rồi viết báo cáo ngắn cho tôi"
+    strategy: react
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, web_search, note_store, report_builder]
+      tools_match: exact
+      answer_contains: ["báo cáo", "ghi chú"]
+    mock_script:
+      - {route: multi_step, reason: "research from two angles, save note, build report"}
+      - {action: tool, tool: web_search, thought: "first find out what RAG is",
+         params: {query: "RAG Retrieval-Augmented Generation là gì", max_results: 5}}
+      - {action: tool, tool: web_search, thought: "then look for real-world applications",
+         params: {query: "RAG ứng dụng thực tế chatbot doanh nghiệp", max_results: 5}}
+      - {action: tool, tool: note_store, thought: "save a summary note for later",
+         params: {action: create, title: "RAG tóm tắt",
+                  content: "RAG = truy xuất tài liệu liên quan rồi đưa vào ngữ cảnh LLM; dùng cho chatbot nội bộ, hỏi đáp tài liệu."}}
+      - {action: tool, tool: report_builder, thought: "assemble the short report",
+         params: {title: "RAG là gì và ứng dụng",
+                  sections: [{heading: "Khái niệm", content: "RAG kết hợp truy xuất dữ liệu ngoài với sinh văn bản của LLM."},
+                             {heading: "Ứng dụng", content: "Chatbot nội bộ, hỏi đáp tài liệu, hỗ trợ khách hàng."}]}}
+      - {action: final, final_answer: "Đã tìm hiểu RAG qua 2 lượt tìm kiếm, lưu ghi chú 'RAG tóm tắt' và tạo báo cáo 'RAG là gì và ứng dụng'."}
+
+  - id: long_seed_weekly_review_react
+    tags: [multi_step, long]
+    request: "Xem danh sách việc và ghi chú hiện có của tôi, tổng hợp thành báo cáo tuần rồi lưu một ghi chú chứa đường dẫn báo cáo"
+    strategy: react
+    seed:
+      todos: ["ôn thi cuối kỳ", "họp nhóm đồ án"]
+      notes: ["Ý tưởng đồ án"]
+    expected:
+      status: done
+      route: multi_step
+      tools: [task_list, note_store, report_builder, note_store]
+      tools_match: exact
+      answer_contains: ["tuần"]
+    mock_script:
+      - {route: multi_step, reason: "read todos and notes, build report, save path note"}
+      - {action: tool, tool: task_list, thought: "read current todos first",
+         params: {action: list}}
+      - {action: tool, tool: note_store, thought: "read existing notes",
+         params: {action: list}}
+      - {action: tool, tool: report_builder, thought: "combine both into a weekly report",
+         params: {title: "Báo cáo tuần",
+                  sections: [{heading: "Việc cần làm", content: "Ôn thi cuối kỳ, họp nhóm đồ án."},
+                             {heading: "Ghi chú", content: "Đang có ghi chú 'Ý tưởng đồ án'."}]}}
+      - {action: tool, tool: note_store, thought: "save the report path for later",
+         params: {action: create, title: "Đường dẫn báo cáo tuần",
+                  content: "Báo cáo tuần nằm trong thư mục reports/."}}
+      - {action: final, final_answer: "Đã tổng hợp 2 việc cần làm và 1 ghi chú thành báo cáo tuần, lưu kèm ghi chú đường dẫn file."}
+
+  - id: long_plan_execute_db_research
+    tags: [multi_step, long]
+    request: "Nghiên cứu ưu nhược điểm của PostgreSQL và MySQL cho dự án, lưu ghi chú kết luận, thêm việc 'đọc lại báo cáo DB' vào danh sách và tạo báo cáo so sánh"
+    strategy: plan_execute
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, web_search, note_store, task_list, report_builder]
+      tools_match: exact
+      answer_contains: ["báo cáo"]
+    mock_script:
+      - {route: multi_step, reason: "research, note, todo, then report — five sequential steps"}
+      - {steps: [{tool: web_search, params: {query: "PostgreSQL vs MySQL ưu nhược điểm", max_results: 5},
+                  rationale: "gather general comparison"},
+                 {tool: web_search, params: {query: "PostgreSQL MySQL benchmark hiệu năng", max_results: 5},
+                  rationale: "gather performance data"},
+                 {tool: note_store,
+                  params: {action: create, title: "Kết luận chọn DB",
+                           content: "PostgreSQL phù hợp hơn: chuẩn SQL tốt, JSONB mạnh; MySQL đơn giản và phổ biến."},
+                  rationale: "save the conclusion note"},
+                 {tool: task_list, params: {action: add, text: "đọc lại báo cáo DB"},
+                  rationale: "remind the user to re-read the report"},
+                 {tool: report_builder,
+                  params: {title: "So sánh PostgreSQL và MySQL",
+                           sections: [{heading: "Ưu điểm PostgreSQL", content: "Chuẩn SQL đầy đủ, JSONB, mở rộng tốt."},
+                                      {heading: "Ưu điểm MySQL", content: "Đơn giản, phổ biến, tài liệu nhiều."},
+                                      {heading: "Kết luận", content: "Chọn PostgreSQL cho dự án này."}]},
+                  rationale: "assemble the final comparison report"}]}
+      - {decision: continue, reason: "general comparison collected"}
+      - {decision: continue, reason: "benchmark data collected"}
+      - {decision: continue, reason: "conclusion note saved"}
+      - {decision: continue, reason: "todo added"}
+      - {decision: done, reason: "report created, all five steps finished"}
+      - "Đã nghiên cứu PostgreSQL và MySQL, lưu ghi chú kết luận, thêm việc 'đọc lại báo cáo DB' và tạo báo cáo so sánh."
+
+  - id: long_recovery_fetch_fallback_react
+    tags: [multi_step, long, recovery]
+    request: "Đọc bài https://example.com/ai-agent, lưu ghi chú tóm tắt rồi viết báo cáo các ý chính"
+    strategy: react
+    patch_tools: {fetch_page: fail_always}
+    expected:
+      status: done
+      route: multi_step
+      tools: [fetch_page, web_search, note_store, report_builder]
+      tools_match: exact
+      answer_contains: ["tìm kiếm"]
+    mock_script:
+      - {route: multi_step, reason: "fetch the page, note the summary, then report"}
+      - {action: tool, tool: fetch_page, thought: "read the source article first",
+         params: {url: "https://example.com/ai-agent"}}
+      - {action: tool, tool: web_search, thought: "page unreachable, fall back to search",
+         params: {query: "example.com ai-agent nội dung bài viết", max_results: 5}}
+      - {action: tool, tool: note_store, thought: "save the summary gathered from search",
+         params: {action: create, title: "Tóm tắt bài AI agent",
+                  content: "Tóm tắt từ kết quả tìm kiếm vì trang gốc không truy cập được."}}
+      - {action: tool, tool: report_builder, thought: "write up the main points",
+         params: {title: "Ý chính bài AI agent",
+                  sections: [{heading: "Nguồn", content: "Trang gốc lỗi, dùng kết quả tìm kiếm thay thế."},
+                             {heading: "Ý chính", content: "AI agent tự lập kế hoạch và gọi công cụ theo vòng lặp."}]}}
+      - {action: final, final_answer: "Trang gốc không truy cập được nên tôi dùng kết quả tìm kiếm thay thế, đã lưu ghi chú tóm tắt và tạo báo cáo ý chính."}

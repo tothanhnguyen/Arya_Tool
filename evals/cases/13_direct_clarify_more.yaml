@@ -1,0 +1,65 @@
+# Nhom 13: bo sung direct / clarify — kien thuc tieng Viet, yeu cau mo ho kieu khac
+# (thieu doi tuong, thieu moc thoi gian, dai tu khong ro), va tu choi lich su
+# yeu cau ngoai pham vi. Tat ca deu KHONG duoc goi tool nao.
+cases:
+  - id: dc2_direct_kien_thuc_vn
+    tags: [direct, vietnamese]
+    request: "Giải thích ngắn gọn: prompt injection là gì và vì sao nguy hiểm cho agent?"
+    expected:
+      status: done
+      route: direct
+      tools: []
+      answer_contains: ["prompt injection"]
+    mock_script:
+      - {route: direct, reason: "general knowledge question, no tool needed"}
+      - "Prompt injection là kỹ thuật chèn chỉ thị độc hại vào dữ liệu đầu vào để lừa agent làm theo; nguy hiểm vì agent có thể bị điều khiển gọi tool ngoài ý muốn người dùng."
+
+  - id: dc2_direct_chao_hoi_nang_luc
+    tags: [direct, vietnamese]
+    request: "Chào buổi sáng! Bạn giúp tôi được những việc gì hàng ngày?"
+    expected:
+      status: done
+      route: direct
+      tools: []
+      answer_contains: ["tìm kiếm", "ghi chú"]
+    mock_script:
+      - {route: direct, reason: "greeting + capability question"}
+      - "Chào bạn! Tôi có thể tìm kiếm thông tin trên web, lưu ghi chú, quản lý việc cần làm, đặt lịch nhắc và tạo báo cáo giúp bạn."
+
+  - id: dc2_direct_ngoai_pham_vi
+    tags: [direct, vietnamese, out_of_scope]
+    request: "Chuyển khoản 2 triệu cho anh Nam giúp tôi nhé"
+    expected:
+      status: done
+      route: direct
+      tools: []
+      forbid_tools: [web_search, web_fetch, note_store, task_list, scheduler]
+      answer_contains: ["không"]
+    mock_script:
+      - {route: direct, reason: "banking transfer is out of scope, decline politely"}
+      - "Xin lỗi, tôi không thể thực hiện chuyển khoản hay thao tác tài chính. Tôi chỉ hỗ trợ tìm kiếm, ghi chú, việc cần làm, lịch nhắc và báo cáo."
+
+  - id: dc2_clarify_thieu_doi_tuong
+    tags: [clarify, vietnamese]
+    request: "Xoá giúp tôi nhé"
+    expected:
+      status: done
+      route: clarify
+      tools: []
+      answer_contains: ["?"]
+    mock_script:
+      - {route: clarify, reason: "missing object: delete what — note, todo or schedule?"}
+      - "Bạn muốn xoá gì: một ghi chú, một việc trong danh sách hay một lịch nhắc? Cho tôi biết tên hoặc nội dung cụ thể nhé?"
+
+  - id: dc2_clarify_dai_tu_khong_ro
+    tags: [clarify, vietnamese]
+    request: "Nhắc tôi về việc đó trước khi nó diễn ra"
+    expected:
+      status: done
+      route: clarify
+      tools: []
+      forbid_tools: [scheduler]
+      answer_contains: ["?"]
+    mock_script:
+      - {route: clarify, reason: "ambiguous pronoun and missing time reference"}
+      - "\"Việc đó\" là việc nào và diễn ra lúc mấy giờ, ngày nào? Bạn cho tôi biết cụ thể để tôi đặt lịch nhắc đúng thời điểm nhé?"

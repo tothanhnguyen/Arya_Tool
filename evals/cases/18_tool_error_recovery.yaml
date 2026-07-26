@@ -1,0 +1,95 @@
+# Nhom 18: tool loi / phuc hoi — tool fail (fail_once/fail_always), agent tu xoay xo.
+# Luu y co che: executor (tools/base.execute) tu retry theo spec.max_retries nen
+# fail_once duoc hap thu trong CUNG mot step (step van "ok"); fail_always thi moi
+# lan retry deu loi -> step "error" va LLM phai doi phuong an hoac bao that.
+cases:
+  - id: rec2_search_fail_once_retry_ok
+    tags: [single_tool, recovery]
+    request: "Tìm giúp tôi tin mới nhất về bão gần Biển Đông"
+    patch_tools: {web_search: fail_once}
+    expected:
+      status: done
+      route: single_tool
+      tools: [web_search]        # fail lan 1 duoc executor retry ngay trong step -> step ok
+      answer_contains: ["bão"]
+    mock_script:
+      - {route: single_tool, reason: "one web search for storm news"}
+      - {action: tool, tool: web_search, thought: "search latest storm news",
+         params: {query: "bão Biển Đông tin mới nhất", max_results: 5}}
+      - {action: final, final_answer: "Tin mới nhất về bão gần Biển Đông: đã tổng hợp từ kết quả tìm kiếm ở trên."}
+
+  - id: rec2_fetch_fail_always_replan_search
+    tags: [multi_step, recovery]
+    request: "Đọc trang https://vnexpress.net/bai-ai rồi tóm tắt nội dung chính cho tôi"
+    strategy: plan_execute
+    patch_tools: {fetch_page: fail_always}
+    expected:
+      status: done
+      route: multi_step
+      tools: [fetch_page, web_search]   # fetch loi -> evaluator replan -> chuyen sang search
+      answer_contains: ["không đọc được trực tiếp"]
+    mock_script:
+      - {route: multi_step, reason: "fetch the page then summarize"}
+      - {steps: [{tool: fetch_page, params: {url: "https://vnexpress.net/bai-ai"},
+                  rationale: "read the article directly"}]}
+      - {decision: replan, reason: "fetch failed repeatedly, switch to web search"}
+      - {steps: [{tool: web_search, params: {query: "vnexpress bài AI nội dung chính"},
+                  rationale: "find the article content via search instead"}]}
+      - {decision: done, reason: "search results are enough to summarize"}
+      - "Trang gốc không đọc được trực tiếp (lỗi tải trang), nên tôi tóm tắt dựa trên kết quả tìm kiếm về bài viết: ..."
+
+  - id: rec2_note_fail_always_honest_report
+    tags: [single_tool, error_path]
+    request: "Lưu ghi chú 'Mật khẩu wifi mới: hoa-mai-2026' giúp tôi"
+    patch_tools: {note_store: fail_always}
+    expected:
+      status: done
+      route: single_tool
+      tools: [note_store]        # thu 2 lan deu loi; final answer phai bao that, khong bia da luu
+      answer_contains: ["không lưu được"]
+    mock_script:
+      - {route: single_tool, reason: "save one note"}
+      - {action: tool, tool: note_store, thought: "create the note",
+         params: {action: create, title: "Wifi", content: "Mật khẩu wifi mới: hoa-mai-2026"}}
+      - {action: tool, tool: note_store, thought: "storage errored, try once more",
+         params: {action: create, title: "Mật khẩu wifi", content: "Mật khẩu wifi mới: hoa-mai-2026"}}
+      - {action: final, final_answer: "Xin lỗi, tôi không lưu được ghi chú do hệ thống lưu trữ đang lỗi (đã thử 2 lần). Bạn thử lại sau giúp nhé; nội dung cần lưu là 'Mật khẩu wifi mới: hoa-mai-2026'."}
+
+  - id: rec2_chain_partial_task_list_fail
+    tags: [multi_step, error_path]
+    request: "Tìm 3 ý tưởng quà sinh nhật cho mẹ rồi thêm ý hay nhất vào việc cần làm"
+    patch_tools: {task_list: fail_always}
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, task_list]   # buoc giua chuoi loi; van tra ket qua tim kiem + noi ro phan thieu
+      answer_contains: ["quà", "không thêm được"]
+    mock_script:
+      - {route: multi_step, reason: "search gift ideas then add the best one to the todo list"}
+      - {action: tool, tool: web_search, thought: "find gift ideas",
+         params: {query: "ý tưởng quà sinh nhật cho mẹ", max_results: 3}}
+      - {action: tool, tool: task_list, thought: "add the best idea to the todo list",
+         params: {action: add, text: "Mua quà sinh nhật cho mẹ: khăn lụa"}}
+      - {action: final, final_answer: "Tôi tìm được 3 ý tưởng quà sinh nhật cho mẹ: khăn lụa, máy massage cổ, bộ ấm trà. Tuy nhiên tôi không thêm được vào danh sách việc cần làm do lỗi hệ thống — bạn thêm thủ công 'Mua quà sinh nhật cho mẹ: khăn lụa' giúp nhé."}
+
+  - id: rec2_plan_execute_fail_once_transparent
+    tags: [multi_step, recovery]
+    request: "Tìm thông tin về giá điện mới rồi soạn báo cáo ngắn"
+    strategy: plan_execute
+    patch_tools: {web_search: fail_once}
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, report_builder]  # fail_once duoc executor retry -> plan chay tiep binh thuong
+      answer_contains: ["báo cáo", "giá điện"]
+    mock_script:
+      - {route: multi_step, reason: "search then build a short report"}
+      - {steps: [{tool: web_search, params: {query: "giá điện mới 2026", max_results: 5},
+                  rationale: "gather info on new electricity prices"},
+                 {tool: report_builder,
+                  params: {title: "Giá điện mới",
+                           sections: [{heading: "Tóm tắt", content: "Giá điện bán lẻ vừa được điều chỉnh."}]},
+                  rationale: "assemble the short report"}]}
+      - {decision: continue, reason: "search succeeded after internal retry, report next"}
+      - {decision: done, reason: "report created"}
+      - "Đã soạn xong báo cáo ngắn về giá điện mới dựa trên thông tin vừa tìm được."

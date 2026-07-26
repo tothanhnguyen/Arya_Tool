@@ -1,0 +1,90 @@
+# Nhom 16: confirm-flow bi tu choi / doi y — user reject hanh dong nguy hiem,
+# agent phai xu ly mem mai (react: nhan observation "user rejected" roi tra loi
+# lich su -> done; plan_execute: ke hoach tuyen tinh vo nghia -> failed ro rang).
+# Tool bi reject co Step status 'rejected' -> KHONG nam trong danh sach executed,
+# nen forbid_tools kiem chung duoc rang tool khong he chay.
+cases:
+  - id: cfm2_note_delete_rejected
+    tags: [confirm, reject]
+    request: "Xóa ghi chú 'nhật ký cá nhân' của tôi đi"
+    seed: {notes: ["nhật ký cá nhân"]}
+    confirm: reject
+    expected:
+      status: done            # react: sau reject LLM van tu chot final answer
+      route: single_tool
+      tools: []               # khong tool nao duoc thuc thi
+      forbid_tools: [note_store]
+      answer_contains: ["giữ nguyên"]
+    mock_script:
+      - {route: single_tool, reason: "delete a note, needs confirmation"}
+      - {action: tool, tool: note_store, thought: "delete note #1",
+         params: {action: delete, note_id: 1}}
+      - {action: final, final_answer: "Bạn đã hủy thao tác nên tôi không xóa gì cả — ghi chú 'nhật ký cá nhân' được giữ nguyên."}
+
+  - id: cfm2_todo_delete_rejected
+    tags: [confirm, reject]
+    request: "Bỏ việc 'nộp báo cáo thuế' khỏi danh sách giúp tôi"
+    seed: {todos: ["nộp báo cáo thuế"]}
+    confirm: reject
+    expected:
+      status: done
+      route: single_tool
+      tools: []
+      forbid_tools: [task_list]
+      answer_contains: ["hủy"]
+    mock_script:
+      - {route: single_tool, reason: "delete a todo, needs confirmation"}
+      - {action: tool, tool: task_list, thought: "delete the tax report todo",
+         params: {action: delete, todo_id: 1}}
+      - {action: final, final_answer: "Đã hủy thao tác theo yêu cầu của bạn, việc 'nộp báo cáo thuế' vẫn còn trong danh sách."}
+
+  - id: cfm2_note_update_rejected
+    tags: [confirm, reject]
+    request: "Sửa ghi chú số 1 thành 'họp dời sang thứ 6'"
+    seed: {notes: ["họp nhóm thứ 5"]}
+    confirm: reject
+    expected:
+      status: done
+      route: single_tool
+      tools: []
+      forbid_tools: [note_store]
+      answer_contains: ["không", "sửa"]
+    mock_script:
+      - {route: single_tool, reason: "update a note, needs confirmation"}
+      - {action: tool, tool: note_store, thought: "update note #1",
+         params: {action: update, note_id: 1, title: "họp nhóm thứ 5",
+                  content: "họp dời sang thứ 6"}}
+      - {action: final, final_answer: "Bạn đã từ chối xác nhận nên tôi không sửa gì — ghi chú số 1 vẫn như cũ."}
+
+  - id: cfm2_scheduler_rejected_plan
+    tags: [confirm, reject]
+    request: "Đặt lịch mỗi tối 22h gửi toàn bộ ghi chú của tôi qua tin nhắn"
+    strategy: plan_execute
+    confirm: reject
+    expected:
+      status: failed          # plan_execute: buoc bi tu choi -> ke hoach fail ro rang
+      route: single_tool
+      tools: []               # step rejected khong duoc thuc thi
+      forbid_tools: [scheduler]
+    mock_script:
+      - {route: single_tool, reason: "create a scheduled job, always needs confirmation"}
+      - {steps: [{tool: scheduler, params: {action: create, cron: "0 22 * * *",
+                  task_template: "Gửi toàn bộ ghi chú qua tin nhắn"},
+                  rationale: "register the nightly job"}]}
+
+  - id: cfm2_todo_delete_approved_control
+    tags: [confirm]
+    request: "Xóa việc 'dọn nhà cuối tuần' khỏi danh sách"
+    seed: {todos: ["dọn nhà cuối tuần"]}
+    confirm: approve
+    expected:
+      status: done            # doi chung: cung flow nhung approve -> tool chay that
+      route: single_tool
+      tools: [task_list]
+      tools_match: exact
+      answer_contains: ["xóa"]
+    mock_script:
+      - {route: single_tool, reason: "delete a todo, needs confirmation"}
+      - {action: tool, tool: task_list, thought: "delete the requested todo",
+         params: {action: delete, todo_id: 1}}
+      - {action: final, final_answer: "Đã xóa việc 'dọn nhà cuối tuần' sau khi bạn xác nhận."}

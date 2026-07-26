@@ -1,0 +1,94 @@
+# Nhom 14: scheduler / cron — dat lich, liet ke, xoa, tu sua cron sai.
+# Luu y: tool scheduler co requires_confirmation=True cho MOI action (ke ca list),
+# nen moi case cham vao scheduler deu can field `confirm`.
+cases:
+  - id: sched_create_weekly_vn
+    tags: [scheduler, confirm, single_tool, vietnamese]
+    request: "Mỗi sáng thứ 2 lúc 8h nhắc tôi chuẩn bị họp tuần với team nhé"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler]
+      tools_match: exact
+      answer_contains: ["thứ 2", "8h"]
+    mock_script:
+      - {route: single_tool, reason: "create a weekly reminder job"}
+      - {action: tool, tool: scheduler, thought: "Monday 08:00 weekly -> cron '0 8 * * 1'",
+         params: {action: create, cron: "0 8 * * 1",
+                  task_template: "Nhắc chuẩn bị họp tuần với team"}}
+      - {action: final, final_answer: "Đã đặt lịch nhắc chuẩn bị họp tuần vào 8h sáng thứ 2 hàng tuần."}
+
+  - id: sched_create_then_list
+    tags: [scheduler, confirm, single_tool]
+    request: "Đặt lịch nhắc uống thuốc 21h hàng ngày, xong liệt kê lại các lịch của tôi để tôi kiểm tra"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler, scheduler]
+      tools_match: exact
+      answer_contains: ["21h", "uống thuốc"]
+    mock_script:
+      - {route: single_tool, reason: "create a job then list to verify"}
+      - {action: tool, tool: scheduler, thought: "daily 21:00 -> cron '0 21 * * *'",
+         params: {action: create, cron: "0 21 * * *",
+                  task_template: "Nhắc uống thuốc buổi tối"}}
+      - {action: tool, tool: scheduler, thought: "list jobs so the user can verify",
+         params: {action: list}}
+      - {action: final, final_answer: "Đã đặt lịch nhắc uống thuốc lúc 21h hàng ngày. Hiện bạn có 1 lịch: job #1 — cron '0 21 * * *'."}
+
+  - id: sched_list_empty
+    tags: [scheduler, confirm, single_tool]
+    request: "Tôi đang có những lịch nhắc định kỳ nào vậy?"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler]
+      tools_match: exact
+      answer_contains: ["chưa có"]
+    mock_script:
+      - {route: single_tool, reason: "list the user's scheduled jobs"}
+      - {action: tool, tool: scheduler, thought: "list existing jobs",
+         params: {action: list}}
+      - {action: final, final_answer: "Bạn chưa có lịch nhắc định kỳ nào. Muốn tôi đặt một lịch mới không?"}
+
+  - id: sched_delete_rejected
+    tags: [scheduler, confirm]
+    request: "Xóa giúp tôi lịch nhắc số 2"
+    confirm: reject
+    expected:
+      status: done
+      route: single_tool
+      tools: []               # step bi tu choi -> khong tool nao duoc thuc thi
+      forbid_tools: [scheduler]
+      answer_contains: ["hủy"]
+    mock_script:
+      - {route: single_tool, reason: "delete a scheduled job, needs confirmation"}
+      - {action: tool, tool: scheduler, thought: "delete job #2 as requested",
+         params: {action: delete, job_id: 2}}
+      # observation "user rejected" -> LLM chot lai, khong thu xoa tiep
+      - {action: final, final_answer: "Đã hủy thao tác xóa theo yêu cầu của bạn, lịch nhắc số 2 được giữ nguyên."}
+
+  - id: sched_bad_cron_selfcorrect
+    tags: [scheduler, confirm, recovery]
+    request: "Cứ 2 tiếng một lần nhắc tôi đứng dậy uống nước"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler, scheduler]   # lan 1 cron 6 truong -> loi, lan 2 sua dung
+      tools_match: exact
+      answer_contains: ["2 tiếng", "uống nước"]
+    mock_script:
+      - {route: single_tool, reason: "create a recurring hydration reminder"}
+      - {action: tool, tool: scheduler, thought: "every 2 hours",
+         params: {action: create, cron: "0 0 */2 * * *",
+                  task_template: "Nhắc đứng dậy uống nước"}}
+      # observation: Invalid cron expression (6 truong thay vi 5) -> LLM tu sua
+      - {action: tool, tool: scheduler,
+         thought: "cron must have 5 fields; fix to '0 */2 * * *'",
+         params: {action: create, cron: "0 */2 * * *",
+                  task_template: "Nhắc đứng dậy uống nước"}}
+      - {action: final, final_answer: "Đã đặt lịch: cứ 2 tiếng tôi sẽ nhắc bạn đứng dậy uống nước."}
