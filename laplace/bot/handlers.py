@@ -1,6 +1,5 @@
 """Telegram handlers (aiogram v3): chat -> task, confirm-flow qua inline button."""
 
-import asyncio
 import json
 import logging
 
@@ -15,6 +14,7 @@ from aiogram.types import (
 
 from laplace.agent.orchestrator import resume_task, run_task
 from laplace.bot.ratelimit import RateLimiter
+from laplace.bot.streaming import ProgressStreamer
 from laplace.db import session_scope
 from laplace.models import Task, User
 from laplace.services.tasks import (
@@ -97,11 +97,29 @@ def _load_task_view(task_id: int) -> dict | None:
         }
 
 
-async def _send_task_outcome(message: Message, task_id: int) -> None:
-    """Gui ket qua task ve chat theo trang thai hien tai."""
+async def _deliver(
+    message: Message,
+    streamer: ProgressStreamer | None,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Uu tien EDIT message trang thai (streaming); fallback gui message moi."""
+    if streamer is not None and await streamer.finalize(text, reply_markup=reply_markup):
+        return
+    await message.answer(text, reply_markup=reply_markup)
+
+
+async def _send_task_outcome(
+    message: Message, task_id: int, streamer: ProgressStreamer | None = None
+) -> None:
+    """Gui ket qua task ve chat theo trang thai hien tai.
+
+    Neu co `streamer`, message trang thai streaming duoc edit thanh ket qua
+    cuoi thay vi gui message moi.
+    """
     view = _load_task_view(task_id)
     if view is None:
-        await message.answer("⚠️ Không tìm thấy task.")
+        await _deliver(message, streamer, "⚠️ Không tìm thấy task.")
         return
 
     status = view["status"]
@@ -118,17 +136,25 @@ async def _send_task_outcome(message: Message, task_id: int) -> None:
             f"Tham số:\n{params[:1000]}\n\n"
             "Bạn có đồng ý thực hiện không?"
         )
-        await message.answer(text, reply_markup=_confirm_keyboard(task_id))
+        await _deliver(message, streamer, text, reply_markup=_confirm_keyboard(task_id))
     elif status == "done":
-        await _reply_chunks(message, view["result"] or "✅ Xong.")
+        result = view["result"] or "✅ Xong."
+        if streamer is not None and await streamer.finalize(result[:TG_CHUNK]):
+            # Phan con lai (neu dai hon 1 message Telegram) gui tiep phia sau
+            for i in range(TG_CHUNK, len(result), TG_CHUNK):
+                await message.answer(result[i : i + TG_CHUNK])
+        else:
+            await _reply_chunks(message, result)
     elif status == "failed":
         detail = (view["error"] or "lỗi không xác định")[:300]
-        await message.answer(
+        await _deliver(
+            message,
+            streamer,
             f"😥 Rất tiếc, tôi chưa hoàn thành được yêu cầu này ({detail}). "
-            "Bạn thử diễn đạt lại hoặc thử lại sau nhé."
+            "Bạn thử diễn đạt lại hoặc thử lại sau nhé.",
         )
     else:
-        await message.answer(f"⏳ Task #{task_id} đang ở trạng thái: {status}")
+        await _deliver(message, streamer, f"⏳ Task #{task_id} đang ở trạng thái: {status}")
 
 
 @router.message(CommandStart())
@@ -165,7 +191,8 @@ async def handle_text(message: Message) -> None:
         )
         return
 
-    await message.answer("⏳ Đang xử lý...")
+    # Message trang thai duy nhat — se duoc EDIT theo tien do roi thay bang ket qua
+    streamer = await ProgressStreamer.start(message)
 
     with session_scope() as session:
         user = get_or_create_user(session, tg_id=tg_id)
@@ -175,13 +202,15 @@ async def handle_text(message: Message) -> None:
         task_id = task.id
 
     try:
-        await asyncio.to_thread(run_task, task_id)
+        await streamer.run(lambda llm: run_task(task_id, llm=llm))
     except Exception:
         logger.exception("run_task crashed task_id=%s", task_id)
-        await message.answer("⚠️ Có lỗi xảy ra khi xử lý yêu cầu. Bạn thử lại sau nhé.")
+        await _deliver(
+            message, streamer, "⚠️ Có lỗi xảy ra khi xử lý yêu cầu. Bạn thử lại sau nhé."
+        )
         return
 
-    await _send_task_outcome(message, task_id)
+    await _send_task_outcome(message, task_id, streamer=streamer)
 
 
 @router.callback_query(F.data.startswith("confirm:"))
@@ -217,11 +246,13 @@ async def handle_confirm(callback: CallbackQuery) -> None:
     except Exception:
         pass
 
+    # Streaming tien do khi resume, giong nhu task thuong
+    streamer = await ProgressStreamer.start(message)
     try:
-        await asyncio.to_thread(resume_task, task_id, approved)
+        await streamer.run(lambda llm: resume_task(task_id, approved, llm=llm))
     except Exception:
         logger.exception("resume_task crashed task_id=%s", task_id)
-        await message.answer("⚠️ Có lỗi khi tiếp tục task. Bạn thử lại sau nhé.")
+        await _deliver(message, streamer, "⚠️ Có lỗi khi tiếp tục task. Bạn thử lại sau nhé.")
         return
 
-    await _send_task_outcome(message, task_id)
+    await _send_task_outcome(message, task_id, streamer=streamer)
