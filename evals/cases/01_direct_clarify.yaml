@@ -1,0 +1,37 @@
+# Nhom 1: tra loi truc tiep va hoi lam ro — khong duoc goi tool nao.
+cases:
+  - id: direct_greeting
+    tags: [direct]
+    request: "Xin chào, bạn là ai và làm được gì?"
+    expected:
+      status: done
+      route: direct
+      tools: []
+      answer_contains: ["laplace"]
+    mock_script:
+      - {route: direct, reason: "greeting, no tool needed"}
+      - "Tôi là Laplace's Demon — trợ lý nghiên cứu và báo cáo cá nhân."
+
+  - id: direct_knowledge
+    tags: [direct]
+    request: "ReAct pattern trong AI agent là gì?"
+    expected:
+      status: done
+      route: direct
+      tools: []
+      answer_contains: ["react"]
+    mock_script:
+      - {route: direct, reason: "general knowledge"}
+      - "ReAct là pattern xen kẽ suy luận (reasoning) và hành động (acting) trong agent."
+
+  - id: clarify_vague
+    tags: [clarify]
+    request: "Làm cái đó cho tôi đi"
+    expected:
+      status: done
+      route: clarify
+      tools: []
+      answer_contains: ["?"]
+    mock_script:
+      - {route: clarify, reason: "request is too vague"}
+      - "Bạn muốn tôi làm việc gì cụ thể? Ví dụ: tìm kiếm, lưu ghi chú hay tạo báo cáo?"

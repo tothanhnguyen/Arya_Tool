@@ -1,0 +1,17 @@
+# Nhom 5: phuc hoi loi — mot tool hong hoan toan, agent phai doi phuong an.
+cases:
+  - id: recovery_fetch_fails_fallback_search
+    tags: [multi_step, recovery]
+    request: "Đọc trang example.com/bai-viet rồi tóm tắt cho tôi"
+    patch_tools: {fetch_page: fail_always}
+    expected:
+      status: done
+      tools: [fetch_page, web_search]   # thu fetch (loi) roi fallback sang search
+      answer_contains: ["không đọc được"]
+    mock_script:
+      - {route: multi_step, reason: "fetch the page then summarize"}
+      - {action: tool, tool: fetch_page, thought: "read the page",
+         params: {url: "https://example.com/bai-viet"}}
+      - {action: tool, tool: web_search, thought: "page failed, search for its content instead",
+         params: {query: "example.com bai-viet nội dung"}}
+      - {action: final, final_answer: "Trang gốc không đọc được nên tôi tổng hợp từ kết quả tìm kiếm: ..."}

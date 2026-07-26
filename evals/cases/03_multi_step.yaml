@@ -1,0 +1,38 @@
+# Nhom 3: tac vu nhieu buoc — cung mot bai toan chay bang ca 2 chien luoc.
+cases:
+  - id: multi_report_react
+    tags: [multi_step]
+    request: "So sánh FastAPI và Flask rồi viết thành báo cáo ngắn"
+    strategy: react
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, report_builder]
+    mock_script:
+      - {route: multi_step, reason: "search then build a report"}
+      - {action: tool, tool: web_search, thought: "gather comparison info",
+         params: {query: "FastAPI vs Flask comparison"}}
+      - {action: tool, tool: report_builder, thought: "assemble the report",
+         params: {title: "FastAPI vs Flask",
+                  sections: [{heading: "Kết luận", content: "FastAPI phù hợp hơn cho dự án này."}]}}
+      - {action: final, final_answer: "Đã tạo báo cáo so sánh FastAPI và Flask."}
+
+  - id: multi_report_plan_execute
+    tags: [multi_step]
+    request: "So sánh FastAPI và Flask rồi viết thành báo cáo ngắn"
+    strategy: plan_execute
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, report_builder]
+    mock_script:
+      - {route: multi_step, reason: "search then build a report"}
+      - {steps: [{tool: web_search, params: {query: "FastAPI vs Flask comparison"},
+                  rationale: "gather info"},
+                 {tool: report_builder,
+                  params: {title: "FastAPI vs Flask",
+                           sections: [{heading: "Kết luận", content: "FastAPI thắng."}]},
+                  rationale: "assemble report"}]}
+      - {decision: continue, reason: "search done, report next"}
+      - {decision: done, reason: "report created"}
+      - "Đã tạo báo cáo so sánh FastAPI và Flask theo kế hoạch 2 bước."

@@ -49,6 +49,7 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(24), default="pending")
     # pending | running | awaiting_confirm | done | failed
     strategy: Mapped[str] = mapped_column(String(24), default="react")  # react | plan_execute
+    route: Mapped[str | None] = mapped_column(String(24), nullable=True)  # ket qua classify
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     state_json: Mapped[dict] = mapped_column(JSON, default=dict)  # plan, cursor, pending step
     result: Mapped[str | None] = mapped_column(Text, nullable=True)

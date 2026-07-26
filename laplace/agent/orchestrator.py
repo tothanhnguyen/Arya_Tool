@@ -44,6 +44,7 @@ def run_task(task_id: int, llm: LLMProvider | None = None) -> Task:
                 session, provider, prompts.build_classify_messages(task.request),
                 RouteDecision, purpose="classify", task_id=task.id,
             )
+            task.route = route.route  # luu cho trace viewer + eval harness
             if route.route == "direct":
                 result = provider.complete(prompts.build_direct_messages(task.request))
                 record_llm_call(

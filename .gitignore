@@ -14,11 +14,14 @@ venv/
 
 # Database
 *.db
+*.db-wal
+*.db-shm
 *.sqlite3
 data/
 
 # Output
 reports/
+eval_results/
 
 # Tooling caches
 .pytest_cache/

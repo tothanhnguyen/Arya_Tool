@@ -1,0 +1,49 @@
+# Nhom 4: human-in-the-loop — hanh dong nhay cam phai dung cho xac nhan.
+cases:
+  - id: confirm_delete_approved
+    tags: [confirm]
+    request: "Xóa việc 'viết proposal' khỏi danh sách"
+    seed: {todos: ["viết proposal"]}
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [task_list]
+      tools_match: exact
+    mock_script:
+      - {route: single_tool, reason: "delete a todo, needs confirmation"}
+      - {action: tool, tool: task_list, thought: "delete the todo",
+         params: {action: delete, todo_id: 1}}
+      - {action: final, final_answer: "Đã xóa việc 'viết proposal' sau khi bạn xác nhận."}
+
+  - id: confirm_delete_rejected
+    tags: [confirm]
+    request: "Xóa hết ghi chú của tôi"
+    seed: {notes: ["ghi chú quan trọng"]}
+    confirm: reject
+    expected:
+      status: done
+      tools: []          # tool bi tu choi -> khong duoc thuc thi
+      answer_contains: ["hủy"]
+    mock_script:
+      - {route: single_tool, reason: "delete note, needs confirmation"}
+      - {action: tool, tool: note_store, thought: "delete the note",
+         params: {action: delete, note_id: 1}}
+      - {action: final, final_answer: "Đã hủy thao tác xóa theo yêu cầu của bạn, ghi chú được giữ nguyên."}
+
+  - id: confirm_scheduler_approved
+    tags: [confirm, scheduler]
+    request: "Mỗi sáng 8h tổng hợp tin AI mới nhất gửi cho tôi"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler]
+      tools_match: exact
+      answer_contains: ["8"]
+    mock_script:
+      - {route: single_tool, reason: "create a scheduled job"}
+      - {action: tool, tool: scheduler, thought: "register daily cron job",
+         params: {action: create, cron: "0 8 * * *",
+                  task_template: "Tổng hợp tin AI mới nhất"}}
+      - {action: final, final_answer: "Đã đặt lịch: mỗi sáng 8h tôi sẽ tổng hợp tin AI và gửi cho bạn."}

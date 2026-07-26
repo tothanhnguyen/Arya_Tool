@@ -1,0 +1,30 @@
+# Nhom 2: mot tool duy nhat, khong can confirm.
+cases:
+  - id: single_search
+    tags: [single_tool]
+    request: "Tìm giúp tôi giá RAM DDR5 32GB hiện nay"
+    expected:
+      status: done
+      route: single_tool
+      tools: [web_search]
+      tools_match: exact
+    mock_script:
+      - {route: single_tool, reason: "needs a web search"}
+      - {action: tool, tool: web_search, thought: "search for RAM prices",
+         params: {query: "giá RAM DDR5 32GB", max_results: 5}}
+      - {action: final, final_answer: "Theo kết quả tìm kiếm, giá RAM DDR5 32GB dao động..."}
+
+  - id: single_note_create
+    tags: [single_tool]
+    request: "Lưu ghi chú: deadline proposal 30/8"
+    expected:
+      status: done
+      route: single_tool
+      tools: [note_store]
+      tools_match: exact
+      answer_contains: ["lưu"]
+    mock_script:
+      - {route: single_tool, reason: "save a note"}
+      - {action: tool, tool: note_store, thought: "create the note",
+         params: {action: create, title: "deadline proposal", content: "30/8"}}
+      - {action: final, final_answer: "Đã lưu ghi chú 'deadline proposal 30/8'."}

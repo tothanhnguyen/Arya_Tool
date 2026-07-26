@@ -110,6 +110,7 @@ def test_api_key_protects_api_and_viewer(client, monkeypatch):
     assert client.get("/", headers={"X-API-Key": "s3cret"}).status_code == 200
 
 
-def test_no_api_key_means_open(client):
-    assert get_settings().api_key is None
+def test_no_api_key_means_open(client, monkeypatch):
+    # Khong phu thuoc .env cua may dev: ep api_key ve trang thai "khong dat"
+    monkeypatch.setattr(get_settings(), "api_key", None)
     assert client.get("/").status_code == 200

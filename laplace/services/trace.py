@@ -77,6 +77,7 @@ def task_trace(session: Session, task_id: int) -> dict[str, Any]:
             "request": task.request,
             "status": task.status,
             "strategy": task.strategy,
+            "route": task.route,
             "result": task.result,
             "error": task.error,
             "created_at": task.created_at.isoformat() if task.created_at else None,
