@@ -86,8 +86,10 @@
 
 <div class="totals">
   <div class="tile"><div class="k">Steps</div><div class="v">{{ totals.steps }}</div></div>
-  <div class="tile"><div class="k">Prompt tokens</div><div class="v">{{ totals.prompt_tokens }}</div></div>
-  <div class="tile"><div class="k">Completion tokens</div><div class="v">{{ totals.completion_tokens }}</div></div>
-  <div class="tile"><div class="k">Total cost (USD)</div><div class="v">{{ "%.6f"|format(totals.cost_usd) }}</div></div>
+  <div class="tile"><div class="k">LLM calls</div><div class="v">{{ usage.llm_calls }}</div></div>
+  <div class="tile"><div class="k">Prompt tokens</div><div class="v">{{ usage.prompt_tokens }}</div></div>
+  <div class="tile"><div class="k">Completion tokens</div><div class="v">{{ usage.completion_tokens }}</div></div>
+  <div class="tile"><div class="k">Total tokens</div><div class="v">{{ usage.total_tokens }}</div></div>
+  <div class="tile"><div class="k">Total cost (USD)</div><div class="v">{{ "%.6f"|format(usage.cost_usd) }}</div></div>
 </div>
 {% endblock %}

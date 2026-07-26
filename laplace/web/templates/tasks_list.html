@@ -10,6 +10,7 @@
       <th>Status</th>
       <th>Strategy</th>
       <th>Route</th>
+      <th class="num">Tokens</th>
       <th class="num">Cost (USD)</th>
       <th class="num">Duration</th>
       <th class="num">Created</th>
@@ -24,6 +25,7 @@
       <td><span class="badge st-{{ t.status }}">{{ t.status }}</span></td>
       <td>{{ t.strategy }}</td>
       <td>{% if t.route %}<span class="badge">{{ t.route }}</span>{% else %}—{% endif %}</td>
+      <td class="num" title="{{ t.llm_calls }} LLM call">{{ t.total_tokens }}</td>
       <td class="num">{{ "%.6f"|format(t.cost_usd) }}</td>
       <td class="num">{% if t.duration_s is not none %}{{ t.duration_s }}s{% else %}—{% endif %}</td>
       <td class="num">{{ t.created_at }}</td>
@@ -31,6 +33,14 @@
     </tr>
     {% endfor %}
   </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="5">Tổng toàn hệ thống ({{ grand.llm_calls }} LLM call, mọi task)</td>
+      <td class="num">{{ grand.total_tokens }}</td>
+      <td class="num">{{ "%.6f"|format(grand.cost_usd) }}</td>
+      <td colspan="3"></td>
+    </tr>
+  </tfoot>
 </table>
 {% else %}
 <div class="empty">Chưa có task nào. Gửi yêu cầu qua Telegram hoặc POST /api/tasks.</div>

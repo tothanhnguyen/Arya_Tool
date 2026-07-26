@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from laplace.db import session_scope
+from laplace.llm.usage import task_usage
 from laplace.models import LLMCall, Task
 from laplace.services.trace import replay_events, task_trace
 from laplace.web.deps import require_api_key
@@ -38,34 +39,60 @@ def _duration_s(task: Task) -> float | None:
     return None
 
 
+def _system_usage(session) -> dict:
+    """Tong token + chi phi TOAN he thong: moi dong trong bang llm_calls,
+    ke ca call khong gan task (vd: judge) va task da rot khoi trang danh sach."""
+    calls, prompt, completion, cost = session.execute(
+        select(
+            func.count(LLMCall.id),
+            func.coalesce(func.sum(LLMCall.prompt_tokens), 0),
+            func.coalesce(func.sum(LLMCall.completion_tokens), 0),
+            func.coalesce(func.sum(LLMCall.cost_usd), 0.0),
+        )
+    ).one()
+    return {
+        "llm_calls": int(calls),
+        "prompt_tokens": int(prompt),
+        "completion_tokens": int(completion),
+        "total_tokens": int(prompt) + int(completion),
+        "cost_usd": round(float(cost), 6),
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def tasks_list(request: Request):
     with session_scope() as session:
         tasks = session.scalars(select(Task).order_by(Task.id.desc()).limit(50)).all()
-        cost_rows = session.execute(
-            select(LLMCall.task_id, func.sum(LLMCall.cost_usd)).group_by(LLMCall.task_id)
-        ).all()
-        costs = {task_id: cost for task_id, cost in cost_rows}
-        rows = [
-            {
-                "id": t.id,
-                "request": (t.request[:80] + "…") if len(t.request) > 80 else t.request,
-                "status": t.status,
-                "strategy": t.strategy,
-                "route": t.route,
-                "cost_usd": round(costs.get(t.id) or 0.0, 6),
-                "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
-                "duration_s": _duration_s(t),
-            }
-            for t in tasks
-        ]
-    return templates.TemplateResponse(request, "tasks_list.html", {"tasks": rows})
+        rows = []
+        for t in tasks:
+            usage = task_usage(session, t.id)
+            rows.append(
+                {
+                    "id": t.id,
+                    "request": (t.request[:80] + "…") if len(t.request) > 80 else t.request,
+                    "status": t.status,
+                    "strategy": t.strategy,
+                    "route": t.route,
+                    "llm_calls": usage["llm_calls"],
+                    "total_tokens": usage["total_tokens"],
+                    "cost_usd": usage["cost_usd"],
+                    "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if t.created_at
+                    else "",
+                    "duration_s": _duration_s(t),
+                }
+            )
+        grand = _system_usage(session)
+    return templates.TemplateResponse(
+        request, "tasks_list.html", {"tasks": rows, "grand": grand}
+    )
 
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 def task_detail(request: Request, task_id: int):
     with session_scope() as session:
         trace = task_trace(session, task_id)
+        usage = task_usage(session, task_id) if trace else None
     if not trace:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
     task = trace["task"]
@@ -77,6 +104,7 @@ def task_detail(request: Request, task_id: int):
             "steps": trace["steps"],
             "llm_calls": trace["llm_calls"],
             "totals": trace["totals"],
+            "usage": usage,
             "auto_refresh": task["status"] in RUNNING_STATUSES,
         },
     )
