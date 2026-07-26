@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Settings — Laplace's Demon{% endblock %}
+{% block head %}
+<style>
+  /* Form controls: cung token voi base (mono, line, paper) — khong che style moi */
+  .field { margin-top: 12px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 650; margin-bottom: 4px; }
+  .field input, .field select {
+    width: 100%; max-width: 520px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 13px; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+  .field input:focus, .field select:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .field .hint { font-size: 11.5px; color: var(--faint); font-family: var(--mono); margin-top: 3px; }
+  .notice.err { border-style: dashed; border-color: var(--ink-2); color: var(--ink-2); }
+  form.settings-form button[type=submit] { margin-top: 14px; }
+  td form { margin: 0; display: inline-flex; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Settings</h1>
+  <span class="count">API key hãng AI · chỉ truy cập từ localhost</span>
+</div>
+
+{% if error %}
+<div class="notice err">{{ error }}</div>
+{% endif %}
+
+{% if success %}
+<div class="notice">
+  Key sống! Model <code>{{ success.model }}</code> trả lời sau {{ success.latency_ms }} ms.
+  Đã ghi .env: LAPLACE_LLM_PROVIDER={{ success.provider }}{% if success.masked_key %} · key {{ success.masked_key }}{% endif %}{% if success.override_model %} · LAPLACE_LLM_MODEL={{ success.override_model }}{% endif %}
+  (backup .env.bak, chmod 600).
+</div>
+{% endif %}
+
+<div class="notice">
+  Lưu ý: cấu hình mới trong .env chỉ áp dụng sau khi <strong>restart</strong> process
+  (<code>python -m laplace</code>) — trang này không hot-reload config đang chạy.
+</div>
+
+<h2>Trạng thái hiện tại</h2>
+<div class="table-card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Hãng</th>
+          <th class="hide-sm">Model mặc định</th>
+          <th>API key</th>
+          <th class="hide-sm">Free tier</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in providers %}
+        <tr>
+          <td class="primary">
+            <span class="tool-name">{{ p.name }}</span>
+            {% if p.is_current %}<span class="badge st-ok">đang chọn</span>{% endif %}
+            <span class="sub">{{ p.label }} · <a href="{{ p.key_url }}" target="_blank" rel="noopener">{% if p.requires_key %}lấy key{% else %}cài đặt{% endif %}</a></span>
+          </td>
+          <td class="hide-sm"><code>{{ p.default_model }}</code></td>
+          <td>
+            {% if not p.requires_key %}
+              <span class="badge ghost">không cần key</span>
+            {% elif p.has_key %}
+              <span class="badge">{{ p.masked_key }}</span>
+            {% else %}
+              <span style="color:var(--faint)">(chưa đặt)</span>
+            {% endif %}
+          </td>
+          <td class="hide-sm">{{ p.free_tier }}</td>
+          <td>
+            {% if not p.requires_key %}
+            <form method="post" action="/settings">
+              <input type="hidden" name="provider" value="{{ p.name }}">
+              <button type="submit" class="btn-ghost">Chọn làm provider</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5">
+            Provider trong .env: <code>{{ current_provider }}</code>{% if current_model %} · model override: <code>{{ current_model }}</code>{% endif %}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<h2>Nối API key</h2>
+<div class="card">
+  <div class="card-body">
+    <form class="settings-form" method="post" action="/settings" autocomplete="off">
+      <div class="field">
+        <label for="provider">Hãng AI</label>
+        <select id="provider" name="provider">
+          {% for p in providers %}
+          <option value="{{ p.name }}" {% if p.name == selected %}selected{% endif %}>
+            {{ p.name }} — {{ p.label }}{% if not p.requires_key %} (không cần key){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="api_key">API key</label>
+        <input type="password" id="api_key" name="api_key" placeholder="dán key vào đây" autocomplete="new-password">
+        <div class="hint">Key đi trong POST body, chỉ ghi vào .env (chmod 600) sau khi validate sống. Ollama bỏ trống.</div>
+      </div>
+      <div class="field">
+        <label for="model">Model override (tùy chọn)</label>
+        <input type="text" id="model" name="model" placeholder="bỏ trống = model mặc định của hãng">
+      </div>
+      <button type="submit" class="btn-ghost">Validate &amp; lưu vào .env</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

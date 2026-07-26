@@ -253,7 +253,8 @@
         </span>
       </a>
       <span class="spacer"></span>
-      <a class="navlink active" href="/">Tasks</a>
+      <a class="navlink{% if active_nav != 'settings' %} active{% endif %}" href="/">Tasks</a>
+      <a class="navlink{% if active_nav == 'settings' %} active{% endif %}" href="/settings">Settings</a>
     </header>
     {% block content %}{% endblock %}
   </div>

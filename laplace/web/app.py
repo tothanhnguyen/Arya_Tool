@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from laplace.db import init_db
 from laplace.tools.base import load_builtin_tools
-from laplace.web import api, traceview
+from laplace.web import api, settings_page, traceview
 
 
 def create_app() -> FastAPI:
@@ -19,4 +19,5 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Laplace's Demon", lifespan=lifespan)
     app.include_router(api.router, prefix="/api")
     app.include_router(traceview.router)
+    app.include_router(settings_page.router)
     return app
