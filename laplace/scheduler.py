@@ -2,7 +2,11 @@
 
 - start_scheduler(on_result): doc ScheduledJob enabled trong DB, dang ky cron job.
 - refresh_jobs(): nap lai danh sach job sau khi scheduler tool thay doi DB.
-- Moi job: tao Task tu task_template -> run_task -> goi on_result(user_id, result).
+- Moi job: tao Task tu task_template -> run_task -> bao ket qua ve user.
+- Bao ket qua uu tien duong STREAMING (laplace/bot/scheduler_stream.py): gui
+  1 message trang thai roi edit theo tien do, cuoi cung thay bang ket qua —
+  giong trai nghiem chat truc tiep. Khong stream duoc (thieu token, user
+  khong co tg_id...) thi fallback duong cu: run_task tran + on_result.
 """
 
 import logging
@@ -22,8 +26,40 @@ _scheduler: BackgroundScheduler | None = None
 _on_result: Callable[[int, str], None] | None = None
 
 
+def task_result_text(task_id: int) -> str:
+    """Van ban ket qua bao ve user sau khi task dinh ky chay xong."""
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        if task is None:
+            return ""
+        if task.status == "done":
+            return task.result or "✅ Xong."
+        return (
+            f"⚠️ Tác vụ định kỳ chưa hoàn thành "
+            f"(status={task.status}): {task.error or ''}"
+        )
+
+
+def _try_stream(task_id: int, user_id: int, run) -> bool:
+    """Thu chay task kem streaming tien do ve Telegram. Best-effort, khong raise.
+
+    True -> task da chay + ket qua da bao qua message streaming.
+    False -> chua chay task (streaming khong kha dung) -> caller chay duong cu.
+    """
+    try:
+        from laplace.bot.scheduler_stream import stream_scheduled_task
+
+        return stream_scheduled_task(task_id, user_id, run)
+    except Exception:
+        logger.warning(
+            "streaming scheduler khong kha dung, chay khong streaming", exc_info=True
+        )
+        return False
+
+
 def _run_scheduled_job(job_id: int, user_id: int, task_template: str) -> None:
-    """Chay 1 job dinh ky: tao task -> run_task -> bao ket qua. Khong raise."""
+    """Chay 1 job dinh ky: tao task -> run_task (uu tien kem streaming tien do
+    ve Telegram) -> bao ket qua. Khong raise."""
     from laplace.agent.orchestrator import run_task
 
     try:
@@ -32,21 +68,12 @@ def _run_scheduled_job(job_id: int, user_id: int, task_template: str) -> None:
             task_id = task.id
         logger.info("scheduled_job=%s tao task=%s", job_id, task_id)
 
-        run_task(task_id)
+        if _try_stream(task_id, user_id, run_task):
+            return  # da chay + da stream tien do + da bao ket qua
 
-        with session_scope() as session:
-            task = session.get(Task, task_id)
-            result = ""
-            if task is not None:
-                if task.status == "done":
-                    result = task.result or "✅ Xong."
-                else:
-                    result = (
-                        f"⚠️ Tác vụ định kỳ chưa hoàn thành "
-                        f"(status={task.status}): {task.error or ''}"
-                    )
+        run_task(task_id)
         if _on_result is not None:
-            _on_result(user_id, result)
+            _on_result(user_id, task_result_text(task_id))
     except Exception:
         logger.exception("scheduled_job=%s loi khi chay", job_id)
 
