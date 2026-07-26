@@ -36,10 +36,12 @@ def _todo_dict(todo: Todo) -> dict:
 @tool(
     name="task_list",
     description=(
-        "Manage the user's todo list. Use action='add' with text to add a new todo, "
-        "action='list' to show all todos with their status, action='done' with todo_id to "
-        "mark a todo as completed, and action='delete' with todo_id to remove a todo. "
-        "Delete requires user confirmation."
+        "Manage the user's todo list (actionable items to complete). Use action='add' "
+        "with text to add a new todo, action='list' to show all todos with their "
+        "status, action='done' with todo_id to mark one completed, and "
+        "action='delete' with todo_id to remove one. For saving reference text or "
+        "long-lived information use note_store instead. Delete requires user "
+        "confirmation."
     ),
     params=TaskListParams,
     confirm_when=lambda p: p.action == "delete",

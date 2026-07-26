@@ -38,11 +38,12 @@ def _note_dict(note: Note) -> dict:
 @tool(
     name="note_store",
     description=(
-        "Create, list, update or delete the user's personal notes. "
-        "Use action='create' with title/content to save a note, action='list' to show all "
-        "notes, action='update' with note_id and new title/content to edit, and "
-        "action='delete' with note_id to remove a note. Update and delete require user "
-        "confirmation."
+        "Create, list, update or delete the user's personal notes (free-form saved "
+        "text: facts, references, reminders to keep). Use action='create' with "
+        "title/content to save a note, action='list' to show all notes, "
+        "action='update' with note_id plus new title/content to edit, and "
+        "action='delete' with note_id to remove a note. For actionable to-do items "
+        "use task_list instead. Update and delete require user confirmation."
     ),
     params=NoteStoreParams,
     confirm_when=lambda p: p.action in ("update", "delete"),
