@@ -182,9 +182,9 @@ def test_self_correction_on_invalid_schema(session):
     retry_messages = llm.calls[1]["messages"]
     assert any("validation" in m["content"].lower() for m in retry_messages)
 
-    # Ca 2 lan classify (sai + dung) deu duoc trace
+    # Ca 2 lan classify (sai + dung) deu duoc trace; lan retry danh dau :fix1
     purposes = [c.purpose for c in get_llm_calls(session, task.id)]
-    assert purposes == ["classify", "classify", "answer"]
+    assert purposes == ["classify", "classify:fix1", "answer"]
 
 
 def test_schema_failure_after_retries_fails_task(session):
