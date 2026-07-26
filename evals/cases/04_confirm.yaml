@@ -24,7 +24,9 @@ cases:
     judge: "Câu trả lời phải cho người dùng biết thao tác xóa KHÔNG được thực hiện (đã hủy theo yêu cầu) và dữ liệu được giữ nguyên"
     expected:
       status: done
-      tools: []          # tool bi tu choi -> khong duoc thuc thi
+      # khong rang buoc tools: sau khi bi tu choi, ReAct duoc phep goi lenh doc
+      # de kiem tra lai; viec "khong xoa" da duoc judge + status cover
+      forbid_tools: [scheduler]
     mock_script:
       - {route: single_tool, reason: "delete note, needs confirmation"}
       - {action: tool, tool: note_store, thought: "delete the note",
