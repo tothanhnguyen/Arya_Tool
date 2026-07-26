@@ -15,7 +15,7 @@ from laplace.evals.harness import load_cases, run_suite
 def main() -> None:
     parser = argparse.ArgumentParser(description="Laplace eval harness")
     parser.add_argument("--cases", default="evals/cases", help="file .yaml hoac thu muc case")
-    parser.add_argument("--provider", default="mock", choices=["mock", "openai"])
+    parser.add_argument("--provider", default="mock", choices=["mock", "openai", "gemini"])
     parser.add_argument("--runs", type=int, default=1, help="so lan chay moi case")
     parser.add_argument("--out", default="eval_results")
     parser.add_argument(
@@ -28,7 +28,7 @@ def main() -> None:
     cases = load_cases(args.cases)
     if args.strategy:
         if args.provider == "mock":
-            parser.error("--strategy chi dung voi --provider openai (mock_script "
+            parser.error("--strategy chi dung voi provider LLM that (mock_script "
                          "duoc viet rieng cho chien luoc goc cua tung case)")
         for c in cases:
             c.strategy = args.strategy

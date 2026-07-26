@@ -46,6 +46,16 @@ def get_provider(name: str | None = None) -> LLMProvider:
         from laplace.llm.openai_provider import OpenAIProvider
 
         return OpenAIProvider(api_key=settings.openai_api_key, model=settings.openai_model)
+    if name == "gemini":
+        # Gemini qua endpoint tuong thich OpenAI — dung chung adapter
+        from laplace.llm.openai_provider import GEMINI_BASE_URL, OpenAIProvider
+
+        return OpenAIProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+            base_url=GEMINI_BASE_URL,
+            name="gemini",
+        )
     from laplace.llm.mock import MockLLM
 
     return MockLLM()

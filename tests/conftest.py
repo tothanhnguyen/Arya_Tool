@@ -6,6 +6,15 @@ from laplace.tools import base as tools_base
 
 
 @pytest.fixture(autouse=True)
+def _test_settings(monkeypatch):
+    """Test khong duoc phu thuoc .env cua may dev: luon dung provider mock."""
+    from laplace.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "mock")
+
+
+@pytest.fixture(autouse=True)
 def _registry_isolation():
     """Snapshot/restore tool registry de test nay khong pha registry cua test khac."""
     saved = dict(tools_base._REGISTRY)

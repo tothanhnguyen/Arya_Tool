@@ -21,7 +21,25 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-4.1-mini": (0.40, 1.60),
     "gpt-4.1-nano": (0.10, 0.40),
     "o4-mini": (1.10, 4.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-pro": (1.25, 10.00),
 }
+
+# Endpoint tuong thich OpenAI cua Gemini
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+RATE_LIMIT_MAX_RETRIES = 5
+
+
+def _retry_delay_from(error: Exception, attempt: int) -> float:
+    """Lay 'retry in Xs' tu thong bao 429 (Gemini); khong co thi backoff tang dan."""
+    import re
+
+    match = re.search(r"retry in (\d+(?:\.\d+)?)s", str(error))
+    if match:
+        return min(float(match.group(1)) + 1.0, 90.0)
+    return min(15.0 * (attempt + 1), 90.0)
 
 
 def _compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -30,18 +48,26 @@ def _compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
 
 
 class OpenAIProvider:
-    name = "openai"
+    """Adapter cho moi API tuong thich OpenAI chat.completions (OpenAI, Gemini...)."""
 
-    def __init__(self, api_key: str | None, model: str = "gpt-4o-mini"):
+    def __init__(
+        self,
+        api_key: str | None,
+        model: str = "gpt-4o-mini",
+        *,
+        base_url: str | None = None,
+        name: str = "openai",
+    ):
         if not api_key:
             raise RuntimeError(
-                "Thieu OpenAI API key: dat LAPLACE_OPENAI_API_KEY trong .env "
-                "(hoac chuyen LAPLACE_LLM_PROVIDER=mock de chay khong can key)."
+                f"Thieu API key cho provider '{name}': dat LAPLACE_{name.upper()}_API_KEY "
+                "trong .env (hoac chuyen LAPLACE_LLM_PROVIDER=mock de chay khong can key)."
             )
         from openai import OpenAI
 
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
+        self.name = name
 
     def complete(
         self,
@@ -69,8 +95,26 @@ class OpenAIProvider:
             )
             kwargs["response_format"] = {"type": "json_object"}
 
+        from openai import BadRequestError, RateLimitError
+
         start = time.monotonic()
-        response = self._client.chat.completions.create(**kwargs)
+        response = None
+        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                break
+            except BadRequestError:
+                # Mot so backend tuong thich OpenAI khong nhan response_format:
+                # bo di va dua vao schema trong system message + validate o tang tren.
+                if "response_format" not in kwargs:
+                    raise
+                kwargs.pop("response_format")
+            except RateLimitError as e:
+                # Free tier Gemini gioi han theo phut; loi 429 kem "retry in Xs"
+                if attempt == RATE_LIMIT_MAX_RETRIES:
+                    raise
+                time.sleep(_retry_delay_from(e, attempt))
+        assert response is not None
         latency_ms = int((time.monotonic() - start) * 1000)
 
         content: str | None = response.choices[0].message.content
