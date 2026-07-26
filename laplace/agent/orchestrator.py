@@ -21,7 +21,7 @@ from laplace.db import session_scope
 from laplace.llm.base import LLMProvider, get_provider
 from laplace.models import Task
 from laplace.schemas import RouteDecision
-from laplace.services.tasks import finish_task
+from laplace.services.tasks import conversation_context, finish_task
 from laplace.services.trace import record_llm_call
 
 
@@ -40,13 +40,17 @@ def run_task(task_id: int, llm: LLMProvider | None = None) -> Task:
         # Commit ngay: khong giu write-lock SQLite suot ca loop (LLM call co the lau)
         session.commit()
         try:
+            conversation = conversation_context(session, task)
             route = call_structured(
-                session, provider, prompts.build_classify_messages(task.request),
+                session, provider,
+                prompts.build_classify_messages(task.request, conversation=conversation),
                 RouteDecision, purpose="classify", task_id=task.id,
             )
             task.route = route.route  # luu cho trace viewer + eval harness
             if route.route == "direct":
-                result = provider.complete(prompts.build_direct_messages(task.request))
+                result = provider.complete(
+                    prompts.build_direct_messages(task.request, conversation=conversation)
+                )
                 record_llm_call(
                     session, result, purpose="answer",
                     provider=provider.name, task_id=task.id,
@@ -54,7 +58,9 @@ def run_task(task_id: int, llm: LLMProvider | None = None) -> Task:
                 finish_task(session, task, "done", result=result.content or "")
             elif route.route == "clarify":
                 result = provider.complete(
-                    prompts.build_clarify_messages(task.request, route.reason)
+                    prompts.build_clarify_messages(
+                        task.request, route.reason, conversation=conversation
+                    )
                 )
                 record_llm_call(
                     session, result, purpose="clarify",

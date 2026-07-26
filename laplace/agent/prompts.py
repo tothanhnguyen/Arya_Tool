@@ -112,6 +112,24 @@ def _history_block(history: list[dict[str, Any]]) -> str:
     )
 
 
+def conversation_block(conversation: list[dict[str, str]] | None) -> str:
+    """Doan hoi thoai gan nhat lam ngu canh (dai tu, cau hoi noi tiep).
+
+    Rong/None -> chuoi rong (task tu API khong co conversation van chay y cu).
+    Noi dung do nguoi dung go — sanitize de khong gia mao duoc delimiter
+    <tool_output> o cho khac trong prompt.
+    """
+    if not conversation:
+        return ""
+    lines = "\n".join(f"[{m['role']}] {m['content']}" for m in conversation)
+    return (
+        "Recent conversation with this user — use it to resolve pronouns and "
+        "follow-up questions; the CURRENT request below is the one to act on:\n"
+        + sanitize_untrusted(lines)
+        + "\n\n"
+    )
+
+
 def validation_error_message(model_name: str, error: str) -> dict[str, str]:
     """Message bao loi validation de LLM tu sua (self-correction)."""
     return {
@@ -124,12 +142,15 @@ def validation_error_message(model_name: str, error: str) -> dict[str, str]:
     }
 
 
-def build_classify_messages(request: str) -> list[dict[str, str]]:
+def build_classify_messages(
+    request: str, conversation: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
     return [
         system_message(),
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "Classify the user request into exactly one route. Decide by counting "
                 "how many tool calls are needed:\n"
                 '- "direct": ZERO tool calls — greetings, chit-chat, questions about you, '
@@ -142,6 +163,9 @@ def build_classify_messages(request: str) -> list[dict[str, str]]:
                 '- "clarify": too vague to act on (missing what/which/when that you '
                 "cannot reasonably assume); ask the user one question first.\n\n"
                 "Rules:\n"
+                "- Interpret the request IN CONTEXT of the recent conversation above "
+                '(a follow-up like "chi tiết hơn đi" refers to the previous topic '
+                'and is NOT "clarify").\n'
                 "- Current events, news, prices or anything time-sensitive always need "
                 'tools — never "direct".\n'
                 "- If the request combines research with a second outcome (a note, "
@@ -165,12 +189,15 @@ def build_classify_messages(request: str) -> list[dict[str, str]]:
     ]
 
 
-def build_direct_messages(request: str) -> list[dict[str, str]]:
+def build_direct_messages(
+    request: str, conversation: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
     return [
         system_message(),
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "Answer the following request directly, without using any tool.\n\n"
                 f"User request:\n{request}"
             ),
@@ -178,12 +205,15 @@ def build_direct_messages(request: str) -> list[dict[str, str]]:
     ]
 
 
-def build_clarify_messages(request: str, reason: str = "") -> list[dict[str, str]]:
+def build_clarify_messages(
+    request: str, reason: str = "", conversation: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
     return [
         system_message(),
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "The following request is ambiguous"
                 + (f" (reason: {reason})" if reason else "")
                 + ". Write ONE short, friendly clarifying question to send back "
@@ -195,13 +225,16 @@ def build_clarify_messages(request: str, reason: str = "") -> list[dict[str, str
 
 
 def build_react_messages(
-    request: str, history: list[dict[str, Any]]
+    request: str,
+    history: list[dict[str, Any]],
+    conversation: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     return [
         system_message(),
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "You are solving the request step by step (ReAct style).\n\n"
                 f"User request:\n{request}\n\n"
                 f"{_history_block(history)}\n\n"
@@ -225,7 +258,9 @@ def build_react_messages(
 
 
 def build_plan_messages(
-    request: str, history: list[dict[str, Any]] | None = None
+    request: str,
+    history: list[dict[str, Any]] | None = None,
+    conversation: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     replan_note = ""
     if history:
@@ -239,6 +274,7 @@ def build_plan_messages(
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "Create a short ordered plan of tool calls to fulfil the request.\n\n"
                 f"User request:\n{request}\n\n"
                 + replan_note
@@ -280,13 +316,16 @@ def build_evaluate_messages(
 
 
 def build_final_messages(
-    request: str, history: list[dict[str, Any]]
+    request: str,
+    history: list[dict[str, Any]],
+    conversation: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     return [
         system_message(),
         {
             "role": "user",
             "content": (
+                f"{conversation_block(conversation)}"
                 "Write the final answer for the user based on the executed steps.\n\n"
                 f"User request:\n{request}\n\n"
                 f"{_history_block(history)}\n\n"

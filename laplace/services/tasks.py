@@ -47,6 +47,25 @@ def recent_messages(session: Session, conversation_id: int, limit: int = 10) -> 
     return list(reversed(rows))
 
 
+def conversation_context(
+    session: Session, task: Task, limit: int = 10, max_chars: int = 500
+) -> list[dict[str, str]]:
+    """Lich su hoi thoai gan nhat cua task, dang [{role, content}] cho prompt.
+
+    - Task khong gan conversation (tao qua API) -> [] (agent chay y nhu cu).
+    - Bo tin nhan cuoi neu chinh la request hien tai (bot da luu no truoc khi
+      run_task) de khong lap lai trong prompt.
+    - Cat moi tin con max_chars ky tu de prompt khong phinh.
+    """
+    if not task.conversation_id:
+        return []
+    msgs = recent_messages(session, task.conversation_id, limit=limit + 1)
+    out = [{"role": m.role, "content": m.content[:max_chars]} for m in msgs]
+    if out and out[-1]["role"] == "user" and task.request.startswith(out[-1]["content"]):
+        out.pop()
+    return out[-limit:]
+
+
 def create_task(
     session: Session,
     user_id: int,
@@ -69,3 +88,7 @@ def finish_task(session: Session, task: Task, status: str, result: str | None = 
     task.error = error
     task.finished_at = datetime.now(UTC)
     session.add(task)
+    # Luu cau tra loi vao hoi thoai de cac task sau co ngu canh (bot chi luu
+    # tin nhan nguoi dung; phia assistant luu tai day — mot cho duy nhat).
+    if status == "done" and task.conversation_id and result:
+        add_message(session, task.conversation_id, "assistant", result)

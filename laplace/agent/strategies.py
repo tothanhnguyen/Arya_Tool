@@ -23,7 +23,7 @@ from laplace.config import get_settings
 from laplace.llm.base import LLMProvider
 from laplace.models import Step, Task
 from laplace.schemas import Plan, PlanStep, ReActAction, ToolResult, Verdict
-from laplace.services.tasks import finish_task
+from laplace.services.tasks import conversation_context, finish_task
 from laplace.services.trace import record_llm_call, record_step
 from laplace.tools.base import ToolContext, ToolSpec, get_tool
 from laplace.tools.base import execute as execute_tool
@@ -209,12 +209,14 @@ class ReActStrategy:
         deadline = time.monotonic() + settings.task_timeout_s
         history: list[dict[str, Any]] = state["history"]
         idx = int(state.get("step_idx", 0))
+        conversation = conversation_context(session, task)
         while idx < settings.max_steps:
             if time.monotonic() >= deadline:
                 finish_task(session, task, "failed", error="task timeout exceeded")
                 return
             action = call_structured(
-                session, llm, prompts.build_react_messages(task.request, history),
+                session, llm,
+                prompts.build_react_messages(task.request, history, conversation=conversation),
                 ReActAction, purpose="react", task_id=task.id,
             )
             if action.action == "final":
@@ -254,7 +256,10 @@ class PlanExecuteStrategy:
 
     def run(self, session: Session, task: Task, llm: LLMProvider, route: str) -> None:
         plan = call_structured(
-            session, llm, prompts.build_plan_messages(task.request),
+            session, llm,
+            prompts.build_plan_messages(
+                task.request, conversation=conversation_context(session, task)
+            ),
             Plan, purpose="plan", task_id=task.id,
         )
         state = {
@@ -357,7 +362,10 @@ class PlanExecuteStrategy:
             state["replans"] = int(state.get("replans", 0)) + 1
             plan = call_structured(
                 session, llm,
-                prompts.build_plan_messages(task.request, history=state["history"]),
+                prompts.build_plan_messages(
+                    task.request, history=state["history"],
+                    conversation=conversation_context(session, task),
+                ),
                 Plan, purpose="replan", task_id=task.id,
             )
             state["plan"] = plan.model_dump()
@@ -367,7 +375,12 @@ class PlanExecuteStrategy:
     def _finalize(
         self, session: Session, task: Task, llm: LLMProvider, state: dict[str, Any]
     ) -> None:
-        result = llm.complete(prompts.build_final_messages(task.request, state["history"]))
+        result = llm.complete(
+            prompts.build_final_messages(
+                task.request, state["history"],
+                conversation=conversation_context(session, task),
+            )
+        )
         record_llm_call(session, result, purpose="final", provider=llm.name, task_id=task.id)
         task.state_json = {}
         finish_task(session, task, "done", result=result.content or "")
