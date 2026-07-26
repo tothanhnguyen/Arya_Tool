@@ -1,6 +1,6 @@
 # Nhom 14: scheduler / cron — dat lich, liet ke, xoa, tu sua cron sai.
-# Luu y: tool scheduler co requires_confirmation=True cho MOI action (ke ca list),
-# nen moi case cham vao scheduler deu can field `confirm`.
+# Luu y: scheduler chi confirm cho action ghi (create/delete); list (chi doc)
+# chay thang. `confirm: approve` o case list-only la no-op, giu lai vo hai.
 cases:
   - id: sched_create_weekly_vn
     tags: [scheduler, confirm, single_tool, vietnamese]

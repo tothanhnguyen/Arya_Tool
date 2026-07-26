@@ -36,10 +36,14 @@ def _todo_dict(todo: Todo) -> dict:
 @tool(
     name="task_list",
     description=(
-        "Manage the user's todo list. Use action='add' with text to add a new todo, "
-        "action='list' to show all todos with their status, action='done' with todo_id to "
-        "mark a todo as completed, and action='delete' with todo_id to remove a todo. "
-        "Delete requires user confirmation."
+        "Manage the user's TODO list (actionable items to complete). "
+        "USE FOR: 'thêm việc cần làm', adding a task, showing todos with status, "
+        "marking one done, removing one. "
+        "DO NOT USE FOR: saving reference text or summaries (use note_store) or "
+        "recurring scheduled jobs (use scheduler). "
+        "PARAMS: action is one of 'add'|'list'|'done'|'delete'; 'add' needs text; "
+        "'done' and 'delete' need todo_id; 'delete' requires user confirmation. "
+        "Example: {\"action\": \"add\", \"text\": \"ôn thi cuối kỳ\"}."
     ),
     params=TaskListParams,
     confirm_when=lambda p: p.action == "delete",

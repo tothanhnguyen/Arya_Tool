@@ -234,5 +234,65 @@ def test_scheduler_errors_and_confirm(session, ctx):
 
     spec = get_tool("scheduler")
     assert spec is not None
-    assert spec.requires_confirmation is True
-    assert spec.needs_confirm(spec.params_model(action="list")) is True
+    # Chi action ghi/nguy hiem (create, delete) can confirm; list (chi doc) thi khong.
+    assert spec.needs_confirm(spec.params_model(action="list")) is False
+    assert (
+        spec.needs_confirm(
+            spec.params_model(action="create", cron="0 8 * * *", task_template="x")
+        )
+        is True
+    )
+    assert spec.needs_confirm(spec.params_model(action="delete", job_id=1)) is True
+
+
+def _run_scheduler_task(session, request: str, script: list) -> "object":
+    """Chay 1 task qua agent loop that (MockLLM co script) roi tra ve Task."""
+    from laplace.agent.orchestrator import run_task
+    from laplace.llm.mock import MockLLM
+    from laplace.models import Task
+    from laplace.services.tasks import create_task, get_or_create_user
+
+    user = get_or_create_user(session)
+    task = create_task(session, user_id=user.id, request=request, strategy="react")
+    session.commit()
+    run_task(task.id, llm=MockLLM(script=script))
+    session.expire_all()
+    return session.get(Task, task.id)
+
+
+def test_scheduler_list_runs_without_confirm(session):
+    """action='list' (chi doc) phai chay thang toi done, khong pause cho confirm."""
+    task = _run_scheduler_task(
+        session,
+        "Liet ke lich nhac cua toi",
+        [
+            {"route": "single_tool", "reason": "list scheduled jobs"},
+            {"thought": "list", "action": "tool", "tool": "scheduler",
+             "params": {"action": "list"}},
+            {"thought": "done", "action": "final", "final_answer": "Ban chua co lich nao."},
+        ],
+    )
+    assert task.status == "done"
+    assert (task.state_json or {}).get("pending") is None
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"action": "create", "cron": "0 8 * * *", "task_template": "Nhac hop"},
+        {"action": "delete", "job_id": 1},
+    ],
+)
+def test_scheduler_write_actions_pause_for_confirm(session, params):
+    """create/delete phai dung o awaiting_confirm truoc khi thuc thi."""
+    task = _run_scheduler_task(
+        session,
+        "Thao tac lich nhac",
+        [
+            {"route": "single_tool", "reason": "write action on scheduler"},
+            {"thought": "do it", "action": "tool", "tool": "scheduler", "params": params},
+        ],
+    )
+    assert task.status == "awaiting_confirm"
+    assert task.state_json["pending"]["tool"] == "scheduler"
+    assert task.state_json["pending"]["params"]["action"] == params["action"]

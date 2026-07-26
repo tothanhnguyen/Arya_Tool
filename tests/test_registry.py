@@ -7,12 +7,19 @@ from laplace.schemas import ToolResult
 from laplace.tools import base as tools_base
 from laplace.tools.base import (
     ToolContext,
+    TransientToolError,
     all_tools,
     execute,
     get_tool,
     specs_for_llm,
     tool,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff(monkeypatch):
+    """Retry trong test khong can ngu that."""
+    monkeypatch.setattr(tools_base, "BACKOFF_BASE_S", 0.0)
 
 
 class FakeParams(BaseModel):
@@ -76,13 +83,29 @@ def test_retry_succeeds_on_second_attempt(clean_registry, ctx):
     def flaky(params: FakeParams, ctx: ToolContext) -> ToolResult:
         calls["n"] += 1
         if calls["n"] == 1:
-            return ToolResult(ok=False, error="transient failure")
+            raise TransientToolError("transient failure")
         return ToolResult(ok=True, data="recovered")
 
     result = execute("flaky", {"value": 1}, ctx)
     assert result.ok is True
     assert result.data == "recovered"
     assert calls["n"] == 2
+
+
+def test_business_error_result_is_not_retried(clean_registry, ctx):
+    """Tool chu dong tra ok=False = loi nghiep vu -> khong retry, prefix [tool_error]."""
+    calls = {"n": 0}
+
+    @tool("notfound", "d", params=FakeParams, max_retries=2)
+    def notfound(params: FakeParams, ctx: ToolContext) -> ToolResult:
+        calls["n"] += 1
+        return ToolResult(ok=False, error="Note 999 not found")
+
+    result = execute("notfound", {"value": 1}, ctx)
+    assert result.ok is False
+    assert calls["n"] == 1
+    assert result.error.startswith("[tool_error]")
+    assert "Note 999 not found" in result.error
 
 
 def test_retry_on_exception_does_not_raise(clean_registry, ctx):
@@ -106,11 +129,12 @@ def test_retry_exhausted_returns_last_error(clean_registry, ctx):
     @tool("always_fail", "d", params=FakeParams, max_retries=1)
     def always_fail(params: FakeParams, ctx: ToolContext) -> ToolResult:
         calls["n"] += 1
-        return ToolResult(ok=False, error=f"failure #{calls['n']}")
+        raise TransientToolError(f"failure #{calls['n']}")
 
     result = execute("always_fail", {"value": 1}, ctx)
     assert result.ok is False
     assert calls["n"] == 2  # max_retries=1 -> 2 lan thu
+    assert result.error == "[network] failure #2"
 
 
 def test_needs_confirm_with_confirm_when(clean_registry):

@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 
 from laplace.agent.orchestrator import resume_task, run_task
+from laplace.bot.ratelimit import RateLimiter
 from laplace.db import session_scope
 from laplace.models import Task, User
 from laplace.services.tasks import (
@@ -29,6 +30,12 @@ router = Router(name="laplace")
 
 MAX_INPUT_CHARS = 2000  # chan message qua dai
 TG_CHUNK = 4000  # gioi han Telegram ~4096 ky tu / message
+
+# Rate limit theo Telegram user id: moi user toi da RATE_MAX_REQUESTS yeu cau
+# trong RATE_WINDOW_S giay — mot user spam khong the chiem het agent loop.
+RATE_MAX_REQUESTS = 6
+RATE_WINDOW_S = 60.0
+rate_limiter = RateLimiter(max_requests=RATE_MAX_REQUESTS, window_s=RATE_WINDOW_S)
 
 START_TEXT = (
     "Xin chào, tôi là Laplace's Demon — trợ lý nghiên cứu & báo cáo cá nhân.\n\n"
@@ -47,7 +54,8 @@ HELP_TEXT = (
     "bằng nút ✅/❌ trước khi thực thi\n"
     "• /start — giới thiệu\n"
     "• /help — trợ giúp này\n\n"
-    f"Lưu ý: tin nhắn tối đa {MAX_INPUT_CHARS} ký tự."
+    f"Lưu ý: tin nhắn tối đa {MAX_INPUT_CHARS} ký tự; "
+    "mỗi người tối đa vài yêu cầu mỗi phút để bot phục vụ được mọi người."
 )
 
 
@@ -148,9 +156,17 @@ async def handle_text(message: Message) -> None:
         )
         return
 
+    tg_id = message.from_user.id if message.from_user else None
+    if tg_id is not None and not rate_limiter.allow(tg_id):
+        wait_s = max(1, int(rate_limiter.retry_after(tg_id) + 0.999))
+        await message.answer(
+            f"🚦 Bạn đang gửi yêu cầu quá nhanh (tối đa {RATE_MAX_REQUESTS} yêu cầu "
+            f"mỗi {int(RATE_WINDOW_S)} giây). Vui lòng đợi khoảng {wait_s} giây rồi thử lại."
+        )
+        return
+
     await message.answer("⏳ Đang xử lý...")
 
-    tg_id = message.from_user.id if message.from_user else None
     with session_scope() as session:
         user = get_or_create_user(session, tg_id=tg_id)
         conv = get_or_create_conversation(session, user.id)
