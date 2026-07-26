@@ -52,10 +52,10 @@ def _job_dict(job: ScheduledJob) -> dict:
         "Manage recurring scheduled jobs for the user. Use action='create' with a 5-field "
         "cron expression and a task_template (the request to run on schedule), "
         "action='list' to show existing jobs, and action='delete' with job_id to remove one. "
-        "Always requires user confirmation."
+        "Create and delete require user confirmation; list does not."
     ),
     params=SchedulerParams,
-    requires_confirmation=True,
+    confirm_when=lambda p: p.action in ("create", "delete"),
 )
 def scheduler_tool(params: SchedulerParams, ctx: ToolContext) -> ToolResult:
     result = _execute(params, ctx)

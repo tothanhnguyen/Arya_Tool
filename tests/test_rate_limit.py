@@ -86,6 +86,26 @@ def test_reset_clears_state():
     assert rl.allow(1) is True
 
 
+def test_reset_all_clears_every_key():
+    rl = RateLimiter(max_requests=1, window_s=60)
+    assert rl.allow("a") is True
+    assert rl.allow("b") is True
+    assert rl.allow("a") is False
+    assert rl.allow("b") is False
+    rl.reset()  # khong truyen key -> xoa toan bo
+    assert rl.allow("a") is True
+    assert rl.allow("b") is True
+
+
+def test_reset_one_key_leaves_others_blocked():
+    rl = RateLimiter(max_requests=1, window_s=60)
+    rl.allow("a")
+    rl.allow("b")
+    rl.reset("a")
+    assert rl.allow("a") is True  # key da reset duoc mo lai
+    assert rl.allow("b") is False  # key khac giu nguyen trang thai
+
+
 def test_invalid_config_rejected():
     with pytest.raises(ValueError):
         RateLimiter(max_requests=0)

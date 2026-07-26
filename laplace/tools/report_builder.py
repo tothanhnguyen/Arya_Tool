@@ -34,10 +34,16 @@ def _slugify(title: str) -> str:
 @tool(
     name="report_builder",
     description=(
-        "Assemble a markdown report from a title and a list of sections (heading + content), "
-        "save it as a .md file under the local 'reports' directory and return both the "
-        "markdown text and the file path. Use this as the final step when the user asks for "
-        "a report, summary document or comparison write-up."
+        "Assemble a markdown report from a title and a list of sections, save it as "
+        "a .md file under the local 'reports' directory and return the markdown text "
+        "plus the file path. "
+        "USE FOR: the FINAL step when the user asks for a report ('báo cáo'), summary "
+        "document or comparison write-up — after gathering material with other tools. "
+        "DO NOT USE FOR: short answers (answer directly) or quick saved text "
+        "(use note_store). "
+        "PARAMS: title (string, required); sections (list of {heading, content}). "
+        "Example: {\"title\": \"FastAPI vs Flask\", \"sections\": "
+        "[{\"heading\": \"Kết luận\", \"content\": \"...\"}]}."
     ),
     params=ReportBuilderParams,
 )
