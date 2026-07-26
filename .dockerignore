@@ -1,0 +1,32 @@
+# Giu context build nho + khong lot secret/du lieu vao image
+.git
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Secrets & du lieu runtime — TUYET DOI khong dua vao image
+.env
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+data/
+reports/
+eval_results/
+
+# Khong can cho container chay bot (eval/test chay o local)
+tests/
+evals/
+docs/
+*.md
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
