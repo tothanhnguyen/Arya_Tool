@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from laplace.models import Conversation, Message, Task, User
@@ -45,6 +45,27 @@ def recent_messages(session: Session, conversation_id: int, limit: int = 10) -> 
         .limit(limit)
     ).all()
     return list(reversed(rows))
+
+
+def recover_orphan_tasks(session: Session) -> int:
+    """Danh dau task mo coi khi app KHOI DONG.
+
+    Luc khoi dong, khong the co task nao dang chay hop le trong tien trinh nay
+    -> moi task 'running'/'pending' la di san cua tien trinh cu bi chet giua
+    chung (vd: kill, crash, het quota roi bi restart). Danh 'failed' ro rang
+    de bot/UI khong hien thi treo vinh vien. 'awaiting_confirm' GIU NGUYEN:
+    resume duoc theo thiet ke (state day du trong state_json).
+    """
+    result = session.execute(
+        update(Task)
+        .where(Task.status.in_(("running", "pending")))
+        .values(
+            status="failed",
+            error="interrupted by app restart",
+            finished_at=datetime.now(UTC),
+        )
+    )
+    return int(result.rowcount or 0)
 
 
 def conversation_context(

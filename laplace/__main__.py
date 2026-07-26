@@ -68,6 +68,14 @@ async def main() -> None:
     init_db()
     load_builtin_tools()
 
+    # Task 'running'/'pending' con sot lai tu tien trinh truoc la mo coi
+    from laplace.services.tasks import recover_orphan_tasks
+
+    with session_scope() as session:
+        orphans = recover_orphan_tasks(session)
+    if orphans:
+        logger.warning("Danh dau %d task mo coi (running/pending) thanh failed", orphans)
+
     from laplace.scheduler import start_scheduler, stop_scheduler
 
     on_result = None

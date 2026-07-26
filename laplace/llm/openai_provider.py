@@ -28,6 +28,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-3.1-flash-lite": (0.10, 0.40),
+    # 3.5: uoc tinh theo tier tuong duong (chua co bang gia cong bo on dinh)
+    "gemini-3.5-flash-lite": (0.10, 0.40),
+    "gemini-3.5-flash": (0.30, 2.50),
 }
 
 # Model da canh bao "khong co gia" — chi warning 1 lan moi model cho do on log.
