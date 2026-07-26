@@ -36,8 +36,23 @@ class LLMProvider(Protocol):
         ...
 
 
+def _with_budget(provider: LLMProvider) -> LLMProvider:
+    """Boc provider that bang tran chi phi moi lan chay task (env; <=0 la tat)."""
+    from laplace.llm.budget import BudgetedLLM, max_cost_from_env
+
+    ceiling = max_cost_from_env()
+    if ceiling <= 0:
+        return provider
+    return BudgetedLLM(provider, ceiling)
+
+
 def get_provider(name: str | None = None) -> LLMProvider:
-    """Factory chon provider theo config (mock | openai)."""
+    """Factory chon provider theo config (mock | openai | gemini).
+
+    Provider that (ton tien) duoc boc BudgetedLLM: orchestrator lay provider
+    moi tu day cho moi lan run/resume nen tran chi phi ap theo tung lan chay.
+    Mock khong boc (test/eval dieu khien truc tiep, khong ton tien).
+    """
     from laplace.config import get_settings
 
     settings = get_settings()
@@ -45,16 +60,20 @@ def get_provider(name: str | None = None) -> LLMProvider:
     if name == "openai":
         from laplace.llm.openai_provider import OpenAIProvider
 
-        return OpenAIProvider(api_key=settings.openai_api_key, model=settings.openai_model)
+        return _with_budget(
+            OpenAIProvider(api_key=settings.openai_api_key, model=settings.openai_model)
+        )
     if name == "gemini":
         # Gemini qua endpoint tuong thich OpenAI — dung chung adapter
         from laplace.llm.openai_provider import GEMINI_BASE_URL, OpenAIProvider
 
-        return OpenAIProvider(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
-            base_url=GEMINI_BASE_URL,
-            name="gemini",
+        return _with_budget(
+            OpenAIProvider(
+                api_key=settings.gemini_api_key,
+                model=settings.gemini_model,
+                base_url=GEMINI_BASE_URL,
+                name="gemini",
+            )
         )
     from laplace.llm.mock import MockLLM
 
