@@ -1,0 +1,186 @@
+{
+  "meta": {
+    "timestamp": "20260726-141649",
+    "name": "exp-smoke-gemini",
+    "n_cases": 4,
+    "runs": 1,
+    "strategies": [
+      "react"
+    ],
+    "providers": [
+      "gemini"
+    ],
+    "models": {
+      "gemini": "gemini-3.1-flash-lite"
+    },
+    "executed": 2,
+    "resumed_from_checkpoint": 2,
+    "partial": false
+  },
+  "summaries": {
+    "react__gemini": {
+      "runs_total": 4,
+      "success_rate": 0.25,
+      "route_accuracy": 0.667,
+      "tool_selection_accuracy": 0.25,
+      "judge_pass_rate": null,
+      "recovery_rate": 0.0,
+      "avg_steps": 0.75,
+      "avg_llm_calls": 2.75,
+      "avg_tokens": 2351.8,
+      "avg_cost_usd": 0.000339,
+      "avg_duration_s": 3.949,
+      "failures": [
+        {
+          "id": "single_task_add",
+          "run": 0,
+          "error": null,
+          "failed_checks": [
+            "tools"
+          ]
+        },
+        {
+          "id": "multi_report_react",
+          "run": 0,
+          "error": null,
+          "failed_checks": [
+            "route",
+            "tools"
+          ]
+        },
+        {
+          "id": "recovery_fetch_fails_fallback_search",
+          "run": 0,
+          "error": null,
+          "failed_checks": [
+            "tools",
+            "answer_contains"
+          ]
+        }
+      ],
+      "p95_duration_s": 4.514,
+      "total_retries": 0
+    }
+  },
+  "runs": [
+    {
+      "id": "direct_greeting",
+      "run": 0,
+      "strategy": "react",
+      "tags": [
+        "direct"
+      ],
+      "status": "done",
+      "route": "direct",
+      "checks": {
+        "status": true,
+        "route": true,
+        "tools": true,
+        "answer_contains": true
+      },
+      "passed": true,
+      "judge_reason": null,
+      "error": null,
+      "steps": 0,
+      "llm_calls": 2,
+      "tokens": 2840,
+      "prompt_tokens": 2530,
+      "completion_tokens": 310,
+      "cost_usd": 0.000377,
+      "duration_s": 4.093,
+      "retries": 0,
+      "config": "react__gemini",
+      "provider": "gemini",
+      "cost_estimated": true
+    },
+    {
+      "id": "single_task_add",
+      "run": 0,
+      "strategy": "react",
+      "tags": [
+        "single_tool"
+      ],
+      "status": "done",
+      "route": "single_tool",
+      "checks": {
+        "status": true,
+        "route": true,
+        "tools": false,
+        "answer_contains": true
+      },
+      "passed": false,
+      "judge_reason": null,
+      "error": null,
+      "steps": 2,
+      "llm_calls": 4,
+      "tokens": 2152,
+      "prompt_tokens": 1849,
+      "completion_tokens": 303,
+      "cost_usd": 0.000306,
+      "duration_s": 4.369,
+      "retries": 0,
+      "config": "react__gemini",
+      "provider": "gemini",
+      "cost_estimated": true
+    },
+    {
+      "id": "multi_report_react",
+      "run": 0,
+      "strategy": "react",
+      "tags": [
+        "multi_step"
+      ],
+      "status": "done",
+      "route": "direct",
+      "checks": {
+        "status": true,
+        "route": false,
+        "tools": false
+      },
+      "passed": false,
+      "judge_reason": null,
+      "error": null,
+      "steps": 0,
+      "llm_calls": 2,
+      "tokens": 3095,
+      "prompt_tokens": 2530,
+      "completion_tokens": 565,
+      "cost_usd": 0.000479,
+      "duration_s": 4.176,
+      "retries": 0,
+      "config": "react__gemini",
+      "provider": "gemini",
+      "cost_estimated": true
+    },
+    {
+      "id": "recovery_fetch_fails_fallback_search",
+      "run": 0,
+      "strategy": "react",
+      "tags": [
+        "multi_step",
+        "recovery"
+      ],
+      "status": "done",
+      "route": "single_tool",
+      "checks": {
+        "status": true,
+        "tools": false,
+        "answer_contains": false
+      },
+      "passed": false,
+      "judge_reason": null,
+      "error": null,
+      "steps": 1,
+      "llm_calls": 3,
+      "tokens": 1320,
+      "prompt_tokens": 1111,
+      "completion_tokens": 209,
+      "cost_usd": 0.000195,
+      "duration_s": 3.159,
+      "retries": 0,
+      "config": "react__gemini",
+      "provider": "gemini",
+      "cost_estimated": true
+    }
+  ]
+}
