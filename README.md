@@ -52,36 +52,70 @@ tests/                   # pytest
 PLAN.md                  # Kế hoạch chi tiết của đồ án
 ```
 
-## Chạy local
+## Cài đặt từng bước
 
-Yêu cầu: Python 3.11+.
+### 0. Yêu cầu hệ thống
+
+- **Python ≥ 3.11** (đã test với 3.12–3.14) — chạy local; hoặc **Docker + Docker Compose ≥ 2.24** nếu chạy container.
+- macOS / Linux (Windows dùng WSL).
+- Không bắt buộc key nào để chạy thử: mặc định dùng **mock provider** (offline). Muốn dùng thật thì cần: token Telegram bot (miễn phí), API key Gemini (có free tier) hoặc OpenAI, Tavily key cho tìm kiếm web (tùy chọn).
+
+### 1. Cài đặt local (venv + pip)
 
 ```bash
+git clone <repo-url> && cd Laplace_Demon
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # cài package + pytest/ruff
+```
 
-cp .env.example .env     # mặc định LAPLACE_LLM_PROVIDER=mock — chạy được ngay, KHÔNG cần API key
+### 2. Cấu hình `.env`
+
+```bash
+cp .env.example .env
+```
+
+Mặc định `LAPLACE_LLM_PROVIDER=mock` — **chạy được ngay, không cần điền gì**. Muốn dùng thật, mở `.env` và điền:
+
+| Muốn gì | Điền gì |
+|---|---|
+| Bot Telegram thật | `LAPLACE_TELEGRAM_BOT_TOKEN` — chat với [@BotFather](https://t.me/BotFather), gõ `/newbot`, đặt tên → nhận token dạng `123456:ABC-...` |
+| LLM Gemini (free tier) | `LAPLACE_LLM_PROVIDER=gemini` + `LAPLACE_GEMINI_API_KEY` — tạo key tại [Google AI Studio](https://aistudio.google.com/apikey) |
+| LLM OpenAI | `LAPLACE_LLM_PROVIDER=openai` + `LAPLACE_OPENAI_API_KEY` |
+| Tìm kiếm web thật | `LAPLACE_SEARCH_API_KEY` (Tavily) — trống thì tool `web_search` trả kết quả stub |
+
+Chi tiết đầy đủ các biến: [docs/HUONG_DAN.md §2](docs/HUONG_DAN.md).
+
+### 3. Chạy bot
+
+```bash
 python -m laplace
 ```
 
-Muốn dùng LLM thật: mở `.env`, đặt `LAPLACE_LLM_PROVIDER=openai` (điền `LAPLACE_OPENAI_API_KEY`) hoặc `gemini` (điền `LAPLACE_GEMINI_API_KEY`). Muốn chạy Telegram bot thì điền thêm `LAPLACE_TELEGRAM_BOT_TOKEN`.
+Một lệnh khởi động cả web (API + trace viewer, http://localhost:8000/), Telegram bot (nếu có token) và scheduler. Mở Telegram, tìm bot của bạn, gõ `/start` rồi nhắn yêu cầu tự nhiên ("Lưu ghi chú: deadline 30/8", "So sánh FastAPI và Flask, viết báo cáo ngắn"...). Dừng bằng `Ctrl+C` (graceful shutdown).
 
-## Chạy test
+### 4. Chạy test & eval
 
 ```bash
-pytest
-python -m laplace.evals   # eval harness: chạy bộ case cố định qua agent loop (mock, offline)
+pytest                     # 48 test, offline, không cần key
+python -m laplace.evals    # eval harness: 37 case qua agent loop thật (mock, offline)
+
+# Số liệu thật (cần key) — lặp 3 lần/case, có thể thêm LLM-as-judge:
+python -m laplace.evals --provider gemini --runs 3 --judge openai
 ```
 
-## Chạy bằng Docker
+Kết quả nằm trong `eval_results/<timestamp>-<provider>/` (`results.json` + `report.md`). Chi tiết: [docs/HUONG_DAN.md §9](docs/HUONG_DAN.md).
+
+### 5. Chạy bằng Docker
 
 ```bash
-cp .env.example .env     # chỉnh sửa nếu cần
+cp .env.example .env       # tùy chọn — không có .env vẫn chạy được ở chế độ mock
 docker compose up --build
 ```
 
-SQLite được lưu ở volume `./data` (`/app/data/laplace.db` trong container) nên dữ liệu giữ nguyên qua các lần restart.
+- SQLite nằm trong volume `./data/` (`/app/data/laplace.db` trong container), báo cáo markdown trong `./reports/` — dữ liệu giữ nguyên qua các lần restart.
+- Container có **healthcheck** (gọi `/openapi.json` mỗi 30s) — `docker compose ps` hiện `healthy` sau ~20 giây.
+- Trace viewer: http://localhost:8000/ như khi chạy local.
 
 ## Bộ tool (6 tool MVP)
 

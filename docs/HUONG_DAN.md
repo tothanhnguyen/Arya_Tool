@@ -46,9 +46,13 @@ Không có token Telegram → app vẫn chạy web + scheduler, log sẽ nhắc.
 ### Chạy bằng Docker
 
 ```bash
+cp .env.example .env       # tùy chọn — thiếu .env vẫn chạy được (mock provider)
 docker compose up --build
-# SQLite được giữ trong ./data/ nhờ volume mount
 ```
+
+- Cần Docker Compose ≥ 2.24 (dùng cú pháp `env_file: required: false`).
+- SQLite được giữ trong `./data/`, báo cáo markdown trong `./reports/` (volume mount).
+- Container có healthcheck gọi `/openapi.json` (endpoint này không bị `LAPLACE_API_KEY` chặn) — `docker compose ps` hiện `healthy` sau ~20 giây.
 
 ## 4. Dùng qua Telegram
 
@@ -96,7 +100,7 @@ Khi đặt `LAPLACE_API_KEY`, thêm header `-H 'X-API-Key: <key>'` vào mọi re
 
 ## 7. Tác vụ định kỳ
 
-Job được tạo bằng cách **nhắn bot** ("mỗi sáng 8h...") hoặc ghi trực tiếp bảng `scheduled_jobs` (cron 5 trường + nội dung yêu cầu). Scheduler đọc job lúc khởi động; sau khi agent tạo/xóa job qua tool, gọi `laplace.scheduler.refresh_jobs()` hoặc restart app để nạp lại. Kết quả job được gửi về Telegram của chủ job.
+Job được tạo bằng cách **nhắn bot** ("mỗi sáng 8h...") hoặc ghi trực tiếp bảng `scheduled_jobs` (cron 5 trường + nội dung yêu cầu). Scheduler đọc job lúc khởi động; khi agent tạo/xóa job qua tool `scheduler`, danh sách job được **tự nạp lại ngay** (tool gọi `refresh_jobs()` sau khi commit). Chỉ khi sửa tay trực tiếp vào DB mới cần restart app. Kết quả job được gửi về Telegram của chủ job.
 
 ## 8. Chạy test & lint
 
@@ -107,17 +111,19 @@ Job được tạo bằng cách **nhắn bot** ("mỗi sáng 8h...") hoặc ghi 
 
 ## 9. Chạy đánh giá (eval harness)
 
-Bộ đánh giá chạy các test case cố định qua **agent loop thật** rồi chấm rule-based và tổng hợp metric (success rate, tool-selection accuracy, cost, latency...). Chi tiết kiến trúc xem [KIEN_TRUC.md](KIEN_TRUC.md#8-eval-harness).
+Bộ đánh giá chạy **37 case** cố định (12 file YAML trong `evals/cases/`) qua **agent loop thật** rồi chấm rule-based (tùy chọn thêm LLM-as-judge) và tổng hợp metric (success rate, tool-selection accuracy, cost, latency...). Chi tiết kiến trúc xem [KIEN_TRUC.md](KIEN_TRUC.md#8-eval-harness).
 
 ```bash
 .venv/bin/python -m laplace.evals                            # mock, offline, deterministic — không cần key
 .venv/bin/python -m laplace.evals --provider gemini --runs 3 # LLM thật, lặp 3 lần/case → số liệu thực
 .venv/bin/python -m laplace.evals --provider openai --strategy plan_execute  # ép 1 chiến lược cho thí nghiệm
+.venv/bin/python -m laplace.evals --provider gemini --judge openai  # chấm thêm bằng LLM-as-judge
 ```
 
 - `--provider mock|openai|gemini` — mock phát lại `mock_script` trong case (regression, không tốn tiền); provider thật bỏ qua `mock_script` và đo số liệu thực.
 - `--runs N` — số lần chạy mỗi case (LLM không xác định nên nên ≥3 khi đo số liệu thật).
 - `--strategy react|plan_execute` — ép mọi case chạy một chiến lược, dùng cho thí nghiệm so sánh (chỉ dùng với provider thật, vì `mock_script` được viết riêng cho chiến lược gốc của case).
+- `--judge mock|openai|gemini` — bật LLM-as-judge: case nào có field `judge` (tiêu chí bằng ngôn ngữ tự nhiên) được một LLM **riêng** chấm chất lượng câu trả lời, ra metric `judge_pass_rate`. Mặc định tắt. **Nên chọn model judge khác model agent** để tránh self-preference bias.
 - `--cases`, `--out` — đổi thư mục case / thư mục kết quả nếu cần.
 
 **Output**: mỗi lần chạy tạo thư mục `eval_results/<timestamp>-<provider>/` chứa:
@@ -126,7 +132,7 @@ Bộ đánh giá chạy các test case cố định qua **agent loop thật** r�
 - `report.md` — bảng tổng hợp metric + bảng từng run + danh sách thất bại, đọc được ngay.
 - Các file DB SQLite tạm (mỗi run một DB sạch) và `reports/` do tool sinh ra — nằm gọn trong thư mục kết quả.
 
-**Viết case mới**: thêm mục vào một file YAML trong `evals/cases/` (xem 6 file sẵn có làm mẫu). Các field:
+**Viết case mới**: thêm mục vào một file YAML trong `evals/cases/` (xem 12 file sẵn có làm mẫu). Các field:
 
 | Field | Ý nghĩa |
 |---|---|
@@ -140,6 +146,7 @@ Bộ đánh giá chạy các test case cố định qua **agent loop thật** r�
 | `confirm` | `approve` / `reject` — kịch bản người dùng bấm nút xác nhận |
 | `patch_tools` | Giả lập tool hỏng: `{tool: fail_once\|fail_always}` — đo khả năng phục hồi |
 | `seed` | Dữ liệu mồi trước khi chạy: `{notes: [...], todos: [...]}` |
+| `judge` | Tiêu chí chấm chất lượng câu trả lời bằng ngôn ngữ tự nhiên — chỉ chấm khi chạy với `--judge` |
 | `mock_script` | Chuỗi phản hồi LLM cho MockLLM phát lại (chỉ dùng ở provider mock) |
 
 ## 10. Sự cố thường gặp
@@ -152,7 +159,7 @@ Bộ đánh giá chạy các test case cố định qua **agent loop thật** r�
 | `database is locked` | Nhiều tiến trình ghi SQLite cùng lúc quá lâu | Đã bật WAL + busy_timeout; nếu vẫn gặp, kiểm tra có chạy 2 app trỏ cùng file DB không |
 | Trả lời luôn có prefix `[mock]` | Đang chạy provider mock | Đặt `LAPLACE_LLM_PROVIDER=openai` hoặc `gemini` + key rồi restart |
 | 401 khi gọi API | `LAPLACE_API_KEY` đang bật | Thêm header `X-API-Key` |
-| Lỗi 429 `RESOURCE_EXHAUSTED` với Gemini | Hết quota free tier — giới hạn tính **theo phút VÀ theo ngày**, mỗi model một quota riêng | Provider đã tự retry theo gợi ý "retry in Xs" của API (hết quota phút chỉ cần chờ); nếu hết quota **ngày** thì đổi sang model lite (`LAPLACE_GEMINI_MODEL=gemini-2.5-flash-lite`) hoặc chờ reset quota |
+| Lỗi 429 `RESOURCE_EXHAUSTED` với Gemini | Hết quota free tier — giới hạn tính **theo phút VÀ theo ngày**, mỗi model một quota riêng | Provider đã tự retry theo gợi ý "retry in Xs" của API (hết quota phút chỉ cần chờ); nếu hết quota **ngày** thì đổi sang model khác còn quota (`LAPLACE_GEMINI_MODEL=...` — mặc định đã là bản lite `gemini-3.1-flash-lite` có quota rộng nhất) hoặc chờ reset quota |
 
 ## 11. Vị trí dữ liệu
 
