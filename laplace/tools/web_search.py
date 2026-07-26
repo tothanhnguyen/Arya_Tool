@@ -2,9 +2,21 @@
 
 Neu co LAPLACE_SEARCH_API_KEY -> goi Tavily API. Khong co key -> che do stub
 tra ket qua deterministic de dev/demo offline van chay duoc.
+
+Search cache (PLAN.md muc 8.8): bat bang env LAPLACE_SEARCH_CACHE=1 khi
+dev/eval — cung input (query chuan hoa + max_results) tra ve cung observation,
+giam chi phi API va lam eval on dinh hon. Cache in-memory theo process, co TTL
+(LAPLACE_SEARCH_CACHE_TTL_S, mac dinh 3600s) va tran so entry. Doc env truc
+tiep (khong qua laplace.config) de tool tu quan cau hinh cua rieng minh.
 """
 
+import copy
 import logging
+import os
+import re
+import threading
+import time
+from collections import OrderedDict
 
 import httpx
 from pydantic import BaseModel, Field
@@ -16,6 +28,58 @@ from laplace.tools.base import ToolContext, tool
 logger = logging.getLogger(__name__)
 
 TAVILY_URL = "https://api.tavily.com/search"
+
+_CACHE_ENV = "LAPLACE_SEARCH_CACHE"
+_CACHE_TTL_ENV = "LAPLACE_SEARCH_CACHE_TTL_S"
+_CACHE_MAX_ENTRIES = 256
+
+# key -> (timestamp, data); OrderedDict de evict entry cu nhat khi vuot tran
+_cache: OrderedDict[tuple[str, int], tuple[float, dict]] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _cache_enabled() -> bool:
+    return os.environ.get(_CACHE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _cache_ttl_s() -> float:
+    try:
+        return float(os.environ.get(_CACHE_TTL_ENV, "3600"))
+    except ValueError:
+        return 3600.0
+
+
+def _cache_key(query: str, max_results: int) -> tuple[str, int]:
+    """Chuan hoa nhe query: casefold + gop khoang trang — 'FastAPI  VS Flask'
+    va 'fastapi vs flask' dung chung mot entry."""
+    return re.sub(r"\s+", " ", query.strip().casefold()), max_results
+
+
+def _cache_get(key: tuple[str, int]) -> dict | None:
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is None:
+            return None
+        ts, data = hit
+        if time.monotonic() - ts >= _cache_ttl_s():
+            del _cache[key]
+            return None
+        # Tra ban sao sau de caller/LLM khong lam ban entry trong cache
+        return copy.deepcopy(data)
+
+
+def _cache_put(key: tuple[str, int], data: dict) -> None:
+    with _cache_lock:
+        _cache[key] = (time.monotonic(), copy.deepcopy(data))
+        _cache.move_to_end(key)
+        while len(_cache) > _CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
+
+
+def clear_search_cache() -> None:
+    """Xoa toan bo cache — dung trong test hoac khi can ket qua moi."""
+    with _cache_lock:
+        _cache.clear()
 
 
 class WebSearchParams(BaseModel):
@@ -58,10 +122,19 @@ def _stub_results(query: str, max_results: int) -> list[dict]:
 def web_search(params: WebSearchParams, ctx: ToolContext) -> ToolResult:
     settings = get_settings()
     if not settings.search_api_key:
+        # Stub da deterministic san — khong can cache
         return ToolResult(
             ok=True,
             data={"results": _stub_results(params.query, params.max_results), "stub": True},
         )
+
+    key = _cache_key(params.query, params.max_results)
+    if _cache_enabled():
+        cached = _cache_get(key)
+        if cached is not None:
+            logger.info("web_search cache hit query=%r max_results=%d", *key)
+            return ToolResult(ok=True, data=cached)
+
     # Loi mang/timeout/HTTP de executor phan loai theo taxonomy va retry + backoff.
     resp = httpx.post(
         TAVILY_URL,
@@ -85,4 +158,9 @@ def web_search(params: WebSearchParams, ctx: ToolContext) -> ToolResult:
         ]
     except Exception as e:
         return ToolResult(ok=False, error=f"web_search could not parse response: {e}")
-    return ToolResult(ok=True, data={"results": results, "stub": False})
+
+    data = {"results": results, "stub": False}
+    if _cache_enabled():
+        # Chi cache ket qua thanh cong; loi mang/parse khong bao gio duoc cache
+        _cache_put(key, data)
+    return ToolResult(ok=True, data=data)
