@@ -249,6 +249,8 @@ def run_case(
         "llm_calls": len(trace["llm_calls"]) if trace else 0,
         "tokens": (trace["totals"]["prompt_tokens"] + trace["totals"]["completion_tokens"])
         if trace else 0,
+        "prompt_tokens": trace["totals"]["prompt_tokens"] if trace else 0,
+        "completion_tokens": trace["totals"]["completion_tokens"] if trace else 0,
         "cost_usd": trace["totals"]["cost_usd"] if trace else 0.0,
         "duration_s": duration_s,
     }
