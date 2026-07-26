@@ -109,3 +109,4 @@ Giới hạn của MVP:
 - SQLite mặc định; PostgreSQL là hướng nâng cấp khi triển khai ổn định.
 
 Roadmap chi tiết theo tuần (kiến trúc, eval harness 2 chiến lược × 2 model, hardening, deploy): xem [PLAN.md](PLAN.md).
+# Laplace-Demon-Beta
