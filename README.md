@@ -2,6 +2,8 @@
 
 **Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM.
 
+📚 **Tài liệu:** [Hướng dẫn cài đặt & sử dụng](docs/HUONG_DAN.md) · [Kiến trúc chi tiết](docs/KIEN_TRUC.md) · [Kế hoạch tổng thể](PLAN.md)
+
 ## Kiến trúc
 
 ```
