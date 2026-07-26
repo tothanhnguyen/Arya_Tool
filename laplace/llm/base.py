@@ -46,35 +46,65 @@ def _with_budget(provider: LLMProvider) -> LLMProvider:
     return BudgetedLLM(provider, ceiling)
 
 
+class MissingAPIKeyError(RuntimeError):
+    """Thieu API key cho provider da chon; message kem URL trang lay key dung hang."""
+
+
+def resolve_provider_config(name: str) -> tuple[Any, str | None, str]:
+    """Tra (preset, api_key, model) cho mot preset theo settings hien tai.
+
+    Thu tu chon model: LAPLACE_LLM_MODEL (override chung) > field rieng trong
+    Settings (openai_model/gemini_model — giu hanh vi cu) > model mac dinh preset.
+    Dung chung cho get_provider va cong cu check/setup (khong boc budget).
+    """
+    from laplace.config import get_settings
+    from laplace.llm.presets import PRESETS
+
+    preset = PRESETS[name]
+    settings = get_settings()
+    api_key = getattr(settings, preset.settings_field, None)
+    model = (
+        settings.llm_model
+        or getattr(settings, f"{name}_model", None)
+        or preset.default_model
+    )
+    return preset, api_key, model
+
+
 def get_provider(name: str | None = None) -> LLMProvider:
-    """Factory chon provider theo config (mock | openai | gemini).
+    """Factory chon provider theo preset registry (laplace/llm/presets.py).
+
+    mock (hoac ten la) -> MockLLM nhu cu; con lai tra OpenAIProvider voi
+    base_url/model/bang gia tu preset. Thieu key -> MissingAPIKeyError kem
+    URL trang lay key cua dung hang do.
 
     Provider that (ton tien) duoc boc BudgetedLLM: orchestrator lay provider
     moi tu day cho moi lan run/resume nen tran chi phi ap theo tung lan chay.
     Mock khong boc (test/eval dieu khien truc tiep, khong ton tien).
     """
     from laplace.config import get_settings
+    from laplace.llm.presets import PRESETS, missing_key_message
 
     settings = get_settings()
     name = name or settings.llm_provider
-    if name == "openai":
-        from laplace.llm.openai_provider import OpenAIProvider
+    if name not in PRESETS:  # mock va moi ten la -> MockLLM (hanh vi cu)
+        from laplace.llm.mock import MockLLM
 
-        return _with_budget(
-            OpenAIProvider(api_key=settings.openai_api_key, model=settings.openai_model)
+        return MockLLM()
+
+    preset, api_key, model = resolve_provider_config(name)
+    if preset.requires_key and not api_key:
+        raise MissingAPIKeyError(missing_key_message(preset))
+
+    from laplace.llm.openai_provider import OpenAIProvider
+
+    return _with_budget(
+        OpenAIProvider(
+            api_key=api_key or "ollama",  # ollama khong can key that, SDK van doi chuoi
+            model=model,
+            base_url=preset.base_url,
+            name=name,
+            pricing=preset.pricing,
+            warn_unknown_price=not preset.local,
         )
-    if name == "gemini":
-        # Gemini qua endpoint tuong thich OpenAI — dung chung adapter
-        from laplace.llm.openai_provider import GEMINI_BASE_URL, OpenAIProvider
-
-        return _with_budget(
-            OpenAIProvider(
-                api_key=settings.gemini_api_key,
-                model=settings.gemini_model,
-                base_url=GEMINI_BASE_URL,
-                name="gemini",
-            )
-        )
-    from laplace.llm.mock import MockLLM
-
-    return MockLLM()
+    )

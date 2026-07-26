@@ -7,13 +7,17 @@ giu nguyen de tang orchestrator tu retry (self-correction).
 """
 
 import json
+import logging
 import time
 from typing import Any
 
 from laplace.llm.base import LLMResult
 
-# Bang gia USD per 1M tokens: {model: (input_per_1m, output_per_1m)}.
-# Model khong co trong bang -> cost 0.0 (van log token de theo doi).
+logger = logging.getLogger(__name__)
+
+# Bang gia fallback USD per 1M tokens: {model: (input_per_1m, output_per_1m)}.
+# Nguon chinh gio la bang gia theo preset (laplace/llm/presets.py) — bang nay
+# giu lai cho tuong thich (evals/experiment.py import) va lam fallback chung.
 PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
@@ -25,6 +29,9 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-pro": (1.25, 10.00),
 }
+
+# Model da canh bao "khong co gia" — chi warning 1 lan moi model cho do on log.
+_WARNED_UNKNOWN_MODELS: set[str] = set()
 
 # Endpoint tuong thich OpenAI cua Gemini
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -42,8 +49,30 @@ def _retry_delay_from(error: Exception, attempt: int) -> float:
     return min(15.0 * (attempt + 1), 90.0)
 
 
-def _compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    input_per_1m, output_per_1m = PRICING.get(model, (0.0, 0.0))
+def _compute_cost(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    pricing: dict[str, tuple[float, float]] | None = None,
+    *,
+    warn_unknown: bool = False,
+) -> float:
+    """Tinh cost tu bang gia preset (uu tien) roi fallback PRICING chung.
+
+    Model la (khong co gia) -> 0.0 + warning DUY NHAT 1 lan moi model
+    (warn_unknown=False voi provider local nhu ollama: gia 0 la dung, khong on ao).
+    """
+    price = (pricing or {}).get(model) or PRICING.get(model)
+    if price is None:
+        if warn_unknown and model not in _WARNED_UNKNOWN_MODELS:
+            _WARNED_UNKNOWN_MODELS.add(model)
+            logger.warning(
+                "Khong co gia cho model '%s' trong bang gia — tinh cost 0.0 "
+                "(token van duoc ghi de theo doi).",
+                model,
+            )
+        return 0.0
+    input_per_1m, output_per_1m = price
     return (prompt_tokens * input_per_1m + completion_tokens * output_per_1m) / 1_000_000
 
 
@@ -57,8 +86,12 @@ class OpenAIProvider:
         *,
         base_url: str | None = None,
         name: str = "openai",
+        pricing: dict[str, tuple[float, float]] | None = None,
+        warn_unknown_price: bool = True,
     ):
         if not api_key:
+            # get_provider() da bao loi than thien kem URL lay key truoc khi toi day;
+            # nhanh nay chi con cho truong hop khoi tao truc tiep.
             raise RuntimeError(
                 f"Thieu API key cho provider '{name}': dat LAPLACE_{name.upper()}_API_KEY "
                 "trong .env (hoac chuyen LAPLACE_LLM_PROVIDER=mock de chay khong can key)."
@@ -68,6 +101,8 @@ class OpenAIProvider:
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.name = name
+        self._pricing = pricing
+        self._warn_unknown_price = warn_unknown_price
 
     def complete(
         self,
@@ -137,7 +172,13 @@ class OpenAIProvider:
             parsed=parsed,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            cost_usd=_compute_cost(model, prompt_tokens, completion_tokens),
+            cost_usd=_compute_cost(
+                model,
+                prompt_tokens,
+                completion_tokens,
+                self._pricing,
+                warn_unknown=self._warn_unknown_price,
+            ),
             latency_ms=latency_ms,
             model=model,
             extra={"finish_reason": response.choices[0].finish_reason},
