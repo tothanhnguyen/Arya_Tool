@@ -34,3 +34,4 @@ eval_results/
 .idea/
 .vscode/
 TASKS.md
+.claude/
