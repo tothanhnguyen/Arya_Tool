@@ -1,0 +1,70 @@
+# Nhom 12: tinh huong tieng Viet doi thuong — lich hoc, tin tuc, ghi chu, ke hoach.
+cases:
+  - id: vn_nhac_lich_hoc
+    tags: [vietnamese, confirm, scheduler, single_tool]
+    request: "Nhắc tôi học IELTS lúc 19h tối thứ 2, 4, 6 hàng tuần nhé"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler]
+      tools_match: exact
+      answer_contains: ["19"]
+    mock_script:
+      - {route: single_tool, reason: "create a recurring study reminder"}
+      - {action: tool, tool: scheduler, thought: "cron for Mon/Wed/Fri 19:00",
+         params: {action: create, cron: "0 19 * * 1,3,5",
+                  task_template: "Nhắc học IELTS buổi tối"}}
+      - {action: final, final_answer: "Đã đặt lịch nhắc học IELTS 19h các tối thứ 2, 4, 6 hàng tuần."}
+
+  - id: vn_hoi_tin_gia_vang
+    tags: [vietnamese, single_tool]
+    request: "Sáng nay có tin gì về giá vàng không? Tóm tắt nhanh giúp tôi"
+    expected:
+      status: done
+      route: single_tool
+      tools: [web_search]
+      tools_match: exact
+      answer_contains: ["giá vàng"]
+    mock_script:
+      - {route: single_tool, reason: "needs fresh news, one search"}
+      - {action: tool, tool: web_search, thought: "search today's gold price news",
+         params: {query: "giá vàng hôm nay", max_results: 5}}
+      - {action: final, final_answer: "Tóm tắt tin giá vàng sáng nay: thị trường biến động nhẹ theo kết quả tìm kiếm."}
+
+  - id: vn_luu_nhieu_ghi_chu
+    tags: [vietnamese, multi_step]
+    request: "Lưu giúp tôi 3 ghi chú: đi chợ mua cá; đóng tiền điện trước 30/7; sinh nhật mẹ 2/8"
+    expected:
+      status: done
+      route: multi_step
+      tools: [note_store]     # 3 lan goi, set van la {note_store}
+      answer_contains: ["3 ghi chú"]
+    mock_script:
+      - {route: multi_step, reason: "three notes to save one by one"}
+      - {action: tool, tool: note_store, thought: "note 1",
+         params: {action: create, title: "Đi chợ", content: "mua cá"}}
+      - {action: tool, tool: note_store, thought: "note 2",
+         params: {action: create, title: "Tiền điện", content: "đóng trước 30/7"}}
+      - {action: tool, tool: note_store, thought: "note 3",
+         params: {action: create, title: "Sinh nhật mẹ", content: "ngày 2/8"}}
+      - {action: final, final_answer: "Đã lưu đủ 3 ghi chú: đi chợ, tiền điện và sinh nhật mẹ."}
+
+  - id: vn_ke_hoach_cuoi_tuan_plan
+    tags: [vietnamese, multi_step]
+    request: "Cuối tuần muốn đi cắm trại gần Hà Nội: tìm địa điểm rồi thêm việc 'chuẩn bị đồ cắm trại' vào danh sách giúp tôi"
+    strategy: plan_execute
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, task_list]
+      answer_contains: ["cắm trại"]
+    mock_script:
+      - {route: multi_step, reason: "search a place, then add a todo"}
+      - {steps: [{tool: web_search, params: {query: "địa điểm cắm trại gần Hà Nội"},
+                  rationale: "find camping spots"},
+                 {tool: task_list, params: {action: add, text: "chuẩn bị đồ cắm trại"},
+                  rationale: "add the prep todo"}]}
+      - {decision: continue, reason: "found candidate spots"}
+      - {decision: done, reason: "todo added, both goals met"}
+      - "Gợi ý vài địa điểm cắm trại gần Hà Nội từ kết quả tìm kiếm và đã thêm việc 'chuẩn bị đồ cắm trại' vào danh sách."

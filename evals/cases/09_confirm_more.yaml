@@ -1,0 +1,53 @@
+# Nhom 9: bo sung human-in-the-loop — update/delete co confirm, va reject trong plan_execute.
+cases:
+  - id: confirm_note_update_approved
+    tags: [confirm, single_tool]
+    request: "Sửa ghi chú số 1 thành 'deadline proposal dời sang 15/9'"
+    seed: {notes: ["deadline proposal"]}
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [note_store]
+      tools_match: exact
+      answer_contains: ["15/9"]
+    mock_script:
+      - {route: single_tool, reason: "update a note, needs confirmation"}
+      - {action: tool, tool: note_store, thought: "update note #1",
+         params: {action: update, note_id: 1, title: "deadline proposal",
+                  content: "dời sang 15/9"}}
+      - {action: final, final_answer: "Đã cập nhật ghi chú: deadline proposal dời sang 15/9."}
+
+  - id: confirm_scheduler_delete_approved
+    tags: [confirm, scheduler]
+    request: "Đặt thử lịch nhắc chạy bộ 6h sáng, xong xóa luôn đi — tôi chỉ muốn test tính năng lịch"
+    confirm: approve
+    expected:
+      status: done
+      route: single_tool
+      tools: [scheduler, scheduler]
+      tools_match: exact
+      answer_contains: ["xóa"]
+    mock_script:
+      - {route: single_tool, reason: "create then delete a scheduled job"}
+      - {action: tool, tool: scheduler, thought: "create the test job",
+         params: {action: create, cron: "0 6 * * *",
+                  task_template: "Nhắc chạy bộ buổi sáng"}}
+      - {action: tool, tool: scheduler, thought: "delete the job just created",
+         params: {action: delete, job_id: 1}}
+      - {action: final, final_answer: "Đã tạo thử lịch nhắc 6h sáng rồi xóa lại như bạn yêu cầu."}
+
+  - id: confirm_task_delete_rejected_plan
+    tags: [confirm]
+    request: "Xóa việc 'mua sữa' khỏi danh sách của tôi"
+    strategy: plan_execute
+    seed: {todos: ["mua sữa"]}
+    confirm: reject
+    expected:
+      status: failed          # plan_execute: buoc bi tu choi -> ke hoach fail ro rang
+      route: single_tool
+      tools: []               # step rejected khong duoc thuc thi
+    mock_script:
+      - {route: single_tool, reason: "delete a todo, needs confirmation"}
+      - {steps: [{tool: task_list, params: {action: delete, todo_id: 1},
+                  rationale: "remove the requested todo"}]}

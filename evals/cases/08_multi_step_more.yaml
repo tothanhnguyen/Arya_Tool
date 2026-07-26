@@ -1,0 +1,84 @@
+# Nhom 8: bo sung kich ban nhieu buoc — ca react lan plan_execute, co replan.
+cases:
+  - id: multi_note_from_search_react
+    tags: [multi_step]
+    request: "Tìm hiểu LangGraph là gì rồi lưu một ghi chú tóm tắt cho tôi"
+    strategy: react
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, note_store]
+      answer_contains: ["ghi chú"]
+    mock_script:
+      - {route: multi_step, reason: "search then save a note"}
+      - {action: tool, tool: web_search, thought: "find what LangGraph is",
+         params: {query: "LangGraph là gì", max_results: 5}}
+      - {action: tool, tool: note_store, thought: "save the summary as a note",
+         params: {action: create, title: "LangGraph",
+                  content: "Framework xây agent dạng đồ thị trạng thái, do LangChain phát triển."}}
+      - {action: final, final_answer: "Đã tìm hiểu và lưu ghi chú 'LangGraph' tóm tắt nội dung chính."}
+
+  - id: multi_search_report_note_react
+    tags: [multi_step]
+    request: "Tổng hợp ưu nhược điểm của SQLite cho đồ án, viết thành báo cáo rồi lưu ghi chú đường dẫn file"
+    strategy: react
+    expected:
+      status: done
+      route: multi_step
+      tools: [web_search, report_builder, note_store]
+    mock_script:
+      - {route: multi_step, reason: "search, build report, then note the path"}
+      - {action: tool, tool: web_search, thought: "gather pros and cons of SQLite",
+         params: {query: "SQLite pros cons production"}}
+      - {action: tool, tool: report_builder, thought: "assemble the report",
+         params: {title: "SQLite cho đồ án",
+                  sections: [{heading: "Ưu điểm", content: "Nhẹ, không cần server, đủ cho single-user."},
+                             {heading: "Nhược điểm", content: "Ghi đồng thời hạn chế."}]}}
+      - {action: tool, tool: note_store, thought: "save the report path for later",
+         params: {action: create, title: "Báo cáo SQLite",
+                  content: "File báo cáo nằm trong thư mục reports/."}}
+      - {action: final, final_answer: "Đã tạo báo cáo 'SQLite cho đồ án' và lưu ghi chú đường dẫn file."}
+
+  - id: multi_plan_execute_todos_note
+    tags: [multi_step]
+    request: "Lên danh sách 2 việc cho tuần sau (ôn thi, họp nhóm) và lưu 1 ghi chú kế hoạch tuần"
+    strategy: plan_execute
+    expected:
+      status: done
+      route: multi_step
+      tools: [task_list, note_store]
+      answer_contains: ["tuần"]
+    mock_script:
+      - {route: multi_step, reason: "several writes: todos then a note"}
+      - {steps: [{tool: task_list, params: {action: add, text: "ôn thi cuối kỳ"},
+                  rationale: "first todo"},
+                 {tool: task_list, params: {action: add, text: "họp nhóm đồ án"},
+                  rationale: "second todo"},
+                 {tool: note_store,
+                  params: {action: create, title: "Kế hoạch tuần sau",
+                           content: "Ưu tiên ôn thi, họp nhóm vào giữa tuần."},
+                  rationale: "save the weekly plan note"}]}
+      - {decision: continue, reason: "first todo added"}
+      - {decision: continue, reason: "second todo added"}
+      - {decision: done, reason: "note saved, plan complete"}
+      - "Đã thêm 2 việc cho tuần sau và lưu ghi chú 'Kế hoạch tuần sau'."
+
+  - id: multi_plan_execute_replan
+    tags: [multi_step, recovery]
+    request: "Đọc trang https://example.com/tin-ai rồi tóm tắt các ý chính"
+    strategy: plan_execute
+    patch_tools: {fetch_page: fail_always}
+    expected:
+      status: done
+      route: multi_step
+      tools: [fetch_page, web_search]
+      answer_contains: ["tìm kiếm"]
+    mock_script:
+      - {route: multi_step, reason: "fetch then summarize"}
+      - {steps: [{tool: fetch_page, params: {url: "https://example.com/tin-ai"},
+                  rationale: "read the source page"}]}
+      - {decision: replan, reason: "fetch failed, switch to web search"}
+      - {steps: [{tool: web_search, params: {query: "example.com tin-ai nội dung"},
+                  rationale: "search for the page content instead"}]}
+      - {decision: done, reason: "got enough material from search"}
+      - "Trang gốc không truy cập được nên tôi tóm tắt từ kết quả tìm kiếm thay thế."

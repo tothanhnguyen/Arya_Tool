@@ -38,6 +38,16 @@ def _tools_block() -> str:
     )
 
 
+def _valid_names_line() -> str:
+    """Nhac lai ten tool hop le ngay canh yeu cau JSON — model nho hay bia ten
+    (thuc nghiem: goi google_search/save_note thay vi web_search/note_store)."""
+    names = ", ".join(spec["name"] for spec in specs_for_llm())
+    return (
+        f"Valid tool names — use EXACTLY one of: [{names}]. "
+        "Any other tool name will fail."
+    )
+
+
 def system_message() -> dict[str, str]:
     return {"role": "system", "content": SYSTEM_PROMPT + "\n" + _tools_block()}
 
@@ -129,6 +139,7 @@ def build_react_messages(
                 '"tool": "<name>", "params": {...}}\n'
                 '- To finish: {"thought": "...", "action": "final", '
                 '"final_answer": "<answer for the user>"}\n'
+                f"{_valid_names_line()}\n"
                 "If a previous tool call failed or was rejected by the user, "
                 "adapt: try another approach or finish with the best answer you can."
             ),
@@ -156,7 +167,8 @@ def build_plan_messages(
                 + replan_note
                 + "Reply with JSON: "
                 '{"steps": [{"tool": "<name>", "params": {...}, "rationale": "..."}]}. '
-                "Use as few steps as possible."
+                "Use as few steps as possible.\n"
+                + _valid_names_line()
             ),
         },
     ]

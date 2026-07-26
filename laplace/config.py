@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    # Mac dinh ban lite: quota free tier rong; gemini-2.5-flash da dong voi key moi
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Interfaces
     telegram_bot_token: str | None = None

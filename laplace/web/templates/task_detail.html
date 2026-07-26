@@ -9,6 +9,7 @@
     <span class="step-idx">{{ task.id }}</span>
     <span class="badge st-{{ task.status }}">{{ task.status }}</span>
     <span>{{ task.strategy }}</span>
+    {% if task.route %}<span class="badge">{{ task.route }}</span>{% else %}<span>—</span>{% endif %}
     <span class="meta">
       {{ task.created_at or "" }}{% if task.finished_at %} → {{ task.finished_at }}{% endif %}
       {% if auto_refresh %} · auto-refresh 5s{% endif %}

@@ -40,6 +40,7 @@ def tasks_list(request: Request):
                 "request": (t.request[:80] + "…") if len(t.request) > 80 else t.request,
                 "status": t.status,
                 "strategy": t.strategy,
+                "route": t.route,
                 "cost_usd": round(costs.get(t.id) or 0.0, 6),
                 "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
                 "duration_s": _duration_s(t),

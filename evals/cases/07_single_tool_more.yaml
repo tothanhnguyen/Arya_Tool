@@ -1,0 +1,94 @@
+# Nhom 7: bo sung single-tool cho cac tool con thieu case rieng.
+cases:
+  - id: single_fetch_fail_offline
+    tags: [single_tool, error_path]
+    request: "Đọc trang https://vnexpress.net/so-hoa/ai và cho tôi biết tiêu đề bài mới nhất"
+    patch_tools: {fetch_page: fail_always}   # offline: khong goi mang that
+    expected:
+      status: done
+      route: single_tool
+      tools: [fetch_page]
+      tools_match: exact
+      answer_contains: ["không đọc được"]
+    mock_script:
+      - {route: single_tool, reason: "fetch one page"}
+      - {action: tool, tool: fetch_page, thought: "read the page",
+         params: {url: "https://vnexpress.net/so-hoa/ai"}}
+      - {action: final, final_answer: "Hiện tôi không đọc được trang này (lỗi mạng), bạn thử lại sau nhé."}
+
+  - id: single_task_add
+    tags: [single_tool]
+    request: "Thêm việc 'nộp báo cáo tuần' vào danh sách việc của tôi"
+    expected:
+      status: done
+      route: single_tool
+      tools: [task_list]
+      tools_match: exact
+      answer_contains: ["nộp báo cáo tuần"]
+    mock_script:
+      - {route: single_tool, reason: "add a todo"}
+      - {action: tool, tool: task_list, thought: "add the todo",
+         params: {action: add, text: "nộp báo cáo tuần"}}
+      - {action: final, final_answer: "Đã thêm việc 'nộp báo cáo tuần' vào danh sách."}
+
+  - id: single_task_list
+    tags: [single_tool]
+    request: "Danh sách việc của tôi đang có những gì?"
+    seed: {todos: ["học tiếng Anh", "gọi điện cho mẹ"]}
+    expected:
+      status: done
+      route: single_tool
+      tools: [task_list]
+      tools_match: exact
+      answer_contains: ["học tiếng anh", "gọi điện cho mẹ"]
+    mock_script:
+      - {route: single_tool, reason: "list todos"}
+      - {action: tool, tool: task_list, thought: "list all todos", params: {action: list}}
+      - {action: final, final_answer: "Bạn có 2 việc: 1) học tiếng Anh, 2) gọi điện cho mẹ."}
+
+  - id: single_task_done
+    tags: [single_tool]
+    request: "Đánh dấu xong việc 'viết proposal' giúp tôi"
+    seed: {todos: ["viết proposal"]}
+    expected:
+      status: done
+      route: single_tool
+      tools: [task_list]
+      tools_match: exact
+      answer_contains: ["xong"]
+    mock_script:
+      - {route: single_tool, reason: "mark todo as done"}
+      - {action: tool, tool: task_list, thought: "mark todo #1 done",
+         params: {action: done, todo_id: 1}}
+      - {action: final, final_answer: "Đã đánh dấu xong việc 'viết proposal'."}
+
+  - id: single_note_list
+    tags: [single_tool]
+    request: "Tôi đang lưu những ghi chú nào?"
+    seed: {notes: ["mật khẩu wifi", "ý tưởng đồ án"]}
+    expected:
+      status: done
+      route: single_tool
+      tools: [note_store]
+      tools_match: exact
+      answer_contains: ["wifi", "ý tưởng đồ án"]
+    mock_script:
+      - {route: single_tool, reason: "list notes"}
+      - {action: tool, tool: note_store, thought: "list all notes", params: {action: list}}
+      - {action: final, final_answer: "Bạn có 2 ghi chú: 'mật khẩu wifi' và 'ý tưởng đồ án'."}
+
+  - id: single_report_only
+    tags: [single_tool]
+    request: "Tạo báo cáo markdown tiêu đề 'Tuần 30' với nội dung: hoàn thành eval harness"
+    expected:
+      status: done
+      route: single_tool
+      tools: [report_builder]
+      tools_match: exact
+      answer_contains: ["tuần 30"]
+    mock_script:
+      - {route: single_tool, reason: "build one report from given content"}
+      - {action: tool, tool: report_builder, thought: "assemble the report",
+         params: {title: "Tuần 30",
+                  sections: [{heading: "Kết quả", content: "Hoàn thành eval harness."}]}}
+      - {action: final, final_answer: "Đã tạo báo cáo 'Tuần 30' và lưu vào thư mục reports."}

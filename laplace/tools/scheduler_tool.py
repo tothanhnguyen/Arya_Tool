@@ -58,6 +58,27 @@ def _job_dict(job: ScheduledJob) -> dict:
     requires_confirmation=True,
 )
 def scheduler_tool(params: SchedulerParams, ctx: ToolContext) -> ToolResult:
+    result = _execute(params, ctx)
+    # Best-effort: bao scheduler dang chay nap lai job ngay, khong can restart app.
+    # Goi SAU khi session_scope da commit de refresh_jobs doc duoc thay doi moi.
+    if result.ok and params.action in ("create", "delete"):
+        _refresh_jobs_best_effort()
+    return result
+
+
+def _refresh_jobs_best_effort() -> None:
+    """Nap lai job cho scheduler in-process; bo qua em neu scheduler chua start."""
+    try:
+        # Import ben trong ham de tranh vong import laplace.scheduler <-> tools
+        from laplace import scheduler
+
+        if scheduler.is_running():
+            scheduler.refresh_jobs()
+    except Exception:
+        logger.warning("refresh_jobs sau khi thay doi scheduled job that bai", exc_info=True)
+
+
+def _execute(params: SchedulerParams, ctx: ToolContext) -> ToolResult:
     try:
         with session_scope() as session:
             if params.action == "create":

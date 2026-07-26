@@ -9,6 +9,7 @@
       <th>Request</th>
       <th>Status</th>
       <th>Strategy</th>
+      <th>Route</th>
       <th class="num">Cost (USD)</th>
       <th class="num">Duration</th>
       <th class="num">Created</th>
@@ -21,6 +22,7 @@
       <td><a href="/tasks/{{ t.id }}">{{ t.request }}</a></td>
       <td><span class="badge st-{{ t.status }}">{{ t.status }}</span></td>
       <td>{{ t.strategy }}</td>
+      <td>{% if t.route %}<span class="badge">{{ t.route }}</span>{% else %}—{% endif %}</td>
       <td class="num">{{ "%.6f"|format(t.cost_usd) }}</td>
       <td class="num">{% if t.duration_s is not none %}{{ t.duration_s }}s{% else %}—{% endif %}</td>
       <td class="num">{{ t.created_at }}</td>

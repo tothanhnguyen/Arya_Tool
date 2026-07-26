@@ -51,6 +51,11 @@ def _run_scheduled_job(job_id: int, user_id: int, task_template: str) -> None:
         logger.exception("scheduled_job=%s loi khi chay", job_id)
 
 
+def is_running() -> bool:
+    """Scheduler da start va dang chay hay chua (dung cho refresh best-effort)."""
+    return _scheduler is not None and _scheduler.running
+
+
 def refresh_jobs() -> None:
     """Nap lai job tu DB (goi sau khi scheduler tool them/xoa ScheduledJob)."""
     if _scheduler is None:

@@ -1,0 +1,69 @@
+# Nhom 10: duong loi — params sai schema, tool khong ton tai, cham tran step limit.
+cases:
+  - id: error_bad_params_selfcorrect
+    tags: [single_tool, error_path, recovery]
+    request: "Tìm tin mới nhất về Gemini 2.0 giúp tôi"
+    expected:
+      status: done
+      route: single_tool
+      tools: [web_search]     # goi 2 lan (1 loi validate + 1 ok) nhung set van la {web_search}
+      answer_contains: ["gemini"]
+    mock_script:
+      - {route: single_tool, reason: "one web search"}
+      # Thieu field bat buoc 'query' -> executor tra observation "Tham so khong hop le"
+      - {action: tool, tool: web_search, thought: "search the news", params: {}}
+      # LLM tu sua params o buoc sau (self-correction qua observation loi)
+      - {action: tool, tool: web_search, thought: "retry with the required query param",
+         params: {query: "Gemini 2.0 tin mới nhất", max_results: 5}}
+      - {action: final, final_answer: "Tin mới nhất về Gemini 2.0: đã tổng hợp từ kết quả tìm kiếm."}
+
+  - id: error_unknown_tool
+    tags: [single_tool, error_path]
+    request: "Gửi email báo cáo tuần cho sếp tôi"
+    expected:
+      status: done
+      route: single_tool
+      tools: [send_email]     # step ghi lai ten tool bia, status=error
+      tools_match: exact
+      answer_contains: ["không có công cụ"]
+    mock_script:
+      - {route: single_tool, reason: "try to send an email"}
+      # Tool khong ton tai -> observation "Tool 'send_email' khong ton tai"
+      - {action: tool, tool: send_email, thought: "send the report by email",
+         params: {to: "boss@example.com", subject: "Báo cáo tuần"}}
+      - {action: final, final_answer: "Tôi không có công cụ gửi email; tôi có thể tạo báo cáo markdown để bạn tự gửi."}
+
+  - id: error_step_limit
+    tags: [multi_step, error_path]
+    request: "Nghiên cứu thật kỹ mọi framework agent đang có trên thị trường"
+    expected:
+      status: failed          # loop bi chan boi max_steps=8 -> error "step limit exceeded"
+      route: multi_step
+      tools: [web_search]
+    mock_script:
+      - {route: multi_step, reason: "open-ended research"}
+      - {action: tool, tool: web_search, params: {query: "agent framework 1"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 2"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 3"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 4"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 5"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 6"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 7"}}
+      - {action: tool, tool: web_search, params: {query: "agent framework 8"}}
+
+  - id: error_tool_level_selfcorrect
+    tags: [single_tool, error_path, recovery]
+    request: "Lưu ghi chú nội dung 'mai họp lúc 9h' giúp tôi"
+    expected:
+      status: done
+      route: single_tool
+      tools: [note_store]
+      answer_contains: ["họp"]
+    mock_script:
+      - {route: single_tool, reason: "save one note"}
+      # title rong -> tool tra loi "'title' is required for action='create'"
+      - {action: tool, tool: note_store, thought: "create the note",
+         params: {action: create, content: "mai họp lúc 9h"}}
+      - {action: tool, tool: note_store, thought: "add the missing title and retry",
+         params: {action: create, title: "Lịch họp", content: "mai họp lúc 9h"}}
+      - {action: final, final_answer: "Đã lưu ghi chú 'Lịch họp: mai họp lúc 9h'."}

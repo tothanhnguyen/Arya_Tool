@@ -1,6 +1,6 @@
 # Laplace's Demon
 
-**Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM.
+**Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM. Stack: Python + FastAPI + aiogram + SQLite, LLM hỗ trợ **OpenAI/Gemini qua provider abstraction** (kèm mock provider chạy offline).
 
 📚 **Tài liệu:** [Hướng dẫn cài đặt & sử dụng](docs/HUONG_DAN.md) · [Kiến trúc chi tiết](docs/KIEN_TRUC.md) · [Kế hoạch tổng thể](PLAN.md)
 
@@ -43,9 +43,11 @@ laplace/
 ├── llm/                 # LLM layer
 │   ├── base.py          #   Protocol LLMProvider + LLMResult + factory
 │   ├── mock.py          #   MockLLM — chạy dev/test không cần API key
-│   └── openai_provider.py  # Adapter OpenAI (token, cost, latency)
+│   └── openai_provider.py  # Adapter OpenAI-compatible: OpenAI + Gemini (token, cost, latency, retry 429)
 ├── services/            # Task service + trace store
+├── evals/               # Eval harness (python -m laplace.evals)
 └── tools/               # Tool registry + các tool
+evals/cases/             # Bộ test case YAML cho eval harness
 tests/                   # pytest
 PLAN.md                  # Kế hoạch chi tiết của đồ án
 ```
@@ -63,12 +65,13 @@ cp .env.example .env     # mặc định LAPLACE_LLM_PROVIDER=mock — chạy đ
 python -m laplace
 ```
 
-Muốn dùng LLM thật: mở `.env`, đặt `LAPLACE_LLM_PROVIDER=openai` và điền `LAPLACE_OPENAI_API_KEY`. Muốn chạy Telegram bot thì điền thêm `LAPLACE_TELEGRAM_BOT_TOKEN`.
+Muốn dùng LLM thật: mở `.env`, đặt `LAPLACE_LLM_PROVIDER=openai` (điền `LAPLACE_OPENAI_API_KEY`) hoặc `gemini` (điền `LAPLACE_GEMINI_API_KEY`). Muốn chạy Telegram bot thì điền thêm `LAPLACE_TELEGRAM_BOT_TOKEN`.
 
 ## Chạy test
 
 ```bash
 pytest
+python -m laplace.evals   # eval harness: chạy bộ case cố định qua agent loop (mock, offline)
 ```
 
 ## Chạy bằng Docker

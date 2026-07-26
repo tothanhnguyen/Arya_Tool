@@ -19,6 +19,11 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=1, help="so lan chay moi case")
     parser.add_argument("--out", default="eval_results")
     parser.add_argument(
+        "--judge", default=None, choices=["mock", "openai", "gemini"],
+        help="provider cham LLM-as-judge cho case co field `judge` (mac dinh: tat; "
+        "nen chon model khac model agent de tranh thien vi)",
+    )
+    parser.add_argument(
         "--strategy", default=None, choices=[None, "react", "plan_execute"],
         help="ep tat ca case chay 1 chien luoc (chi dung voi --provider openai; "
         "mock_script gan voi chien luoc goc cua case)",
@@ -33,7 +38,8 @@ def main() -> None:
         for c in cases:
             c.strategy = args.strategy
     print(f"Nap {len(cases)} case tu {args.cases}; provider={args.provider}, runs={args.runs}")
-    summary = run_suite(cases, provider=args.provider, runs=args.runs, out_dir=args.out)
+    summary = run_suite(cases, provider=args.provider, runs=args.runs, out_dir=args.out,
+                        judge_provider=args.judge)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"\nBao cao: {summary['out_dir']}/report.md")
 
