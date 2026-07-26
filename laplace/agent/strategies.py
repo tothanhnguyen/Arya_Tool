@@ -11,6 +11,7 @@ Ca hai chia se:
   `task.state_json` de resume_task khoi phuc va tiep tuc dung cho.
 """
 
+import logging
 import time
 from typing import Any, Protocol, TypeVar
 
@@ -26,6 +27,8 @@ from laplace.services.tasks import finish_task
 from laplace.services.trace import record_llm_call, record_step
 from laplace.tools.base import ToolContext, ToolSpec, get_tool
 from laplace.tools.base import execute as execute_tool
+
+logger = logging.getLogger(__name__)
 
 MAX_SCHEMA_RETRIES = 2  # so lan retry them sau lan goi dau tien
 MAX_REPLANS = 2
@@ -51,21 +54,29 @@ def call_structured(
 ) -> ModelT:
     """Goi LLM ep JSON schema, validate bang Pydantic, retry kem thong bao loi.
 
-    Moi lan goi (ke ca lan retry) deu ghi record_llm_call de trace day du.
+    Self-correction: moi lan output sai schema, thong bao loi validation duoc
+    gui lai cho LLM tu sua, toi da MAX_SCHEMA_RETRIES lan. Moi lan goi (ke ca
+    retry) deu ghi record_llm_call; lan retry mang purpose "<purpose>:fixN" de
+    trace viewer/metric dem duoc so lan tu sua.
     """
     msgs = list(messages)
     schema = model_cls.model_json_schema()
     last_error: ValidationError | None = None
-    for _attempt in range(MAX_SCHEMA_RETRIES + 1):
+    for attempt in range(MAX_SCHEMA_RETRIES + 1):
         result = llm.complete(msgs, json_schema=schema)
         record_llm_call(
-            session, result, purpose=purpose, provider=llm.name,
-            task_id=task_id, step_id=step_id,
+            session, result,
+            purpose=purpose if attempt == 0 else f"{purpose}:fix{attempt}",
+            provider=llm.name, task_id=task_id, step_id=step_id,
         )
         try:
             return model_cls.model_validate(result.parsed)
         except ValidationError as e:
             last_error = e
+            logger.warning(
+                "structured output invalid purpose=%s model=%s attempt=%d/%d: %s",
+                purpose, model_cls.__name__, attempt + 1, MAX_SCHEMA_RETRIES + 1, e,
+            )
             msgs = msgs + [prompts.validation_error_message(model_cls.__name__, str(e))]
     raise SchemaValidationError(
         f"LLM failed to produce a valid {model_cls.__name__} after "
