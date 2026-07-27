@@ -109,11 +109,11 @@ Chi tiết đầy đủ các biến: [docs/HUONG_DAN.md §2](docs/HUONG_DAN.md).
 
 Repository đã có sẵn:
 
-- schema 17 bảng tại `supabase/migrations/`;
+- schema 18 bảng tại `supabase/migrations/`, gồm metadata artifact;
 - RLS theo owner và hai bucket private `arya-media`, `arya-artifacts`;
 - kết nối SQLAlchemy/psycopg có SSL, pool và startup check;
-- Storage adapter `local/supabase`;
-- ETL SQLite → Postgres/Storage, mặc định chỉ dry-run;
+- Storage adapter media cùng artifact service private/signed URL;
+- ETL SQLite → Postgres/Storage có inventory/reconciliation, mặc định chỉ dry-run;
 - SQLite vẫn là mặc định cho đến khi bạn tự điền thông tin Supabase.
 
 Sau khi tạo project, điền các biến sau vào `.env` trên máy của bạn. Không gửi
@@ -275,6 +275,18 @@ docker compose up --build
 - Container có **healthcheck** (gọi `/openapi.json` mỗi 30s) — `docker compose ps` hiện `healthy` sau ~20 giây.
 - Trace viewer: http://localhost:8010/ như khi chạy local.
 
+### 6. CI/CD
+
+GitHub Actions chạy `ruff check .`, toàn bộ `pytest` offline và Docker build cho
+mọi pull request vào `main`. Khi push `main` hoặc tag `v*`, cùng image đã qua
+gate được publish lên GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/tothanhnguyen/arya_tool:latest
+```
+
+Workflow chỉ dùng `GITHUB_TOKEN` do GitHub cấp, không cần commit thêm secret.
+
 ## Bộ tool (9 tool MVP)
 
 | Tool | Chức năng | Ghi/Đọc | Cần confirm |
@@ -300,8 +312,10 @@ hoa hồng, EPC và tỷ lệ chuyển đổi. Dữ liệu được ghi nhận q
 Giới hạn của MVP:
 
 - Chưa có adapter Meta Graph/TikTok thật; chỉ `MockPublisher` được bật.
-- Dashboard hiện thiên về theo dõi; luồng ghi dùng REST API trong `/docs`.
-- Chưa import file đối soát affiliate nên `/report` chưa có doanh thu/hoa hồng.
+- Dashboard local đã có form ghi dữ liệu; Supabase Auth session vẫn chưa nối,
+  nên database nhiều owner sẽ fail closed ở `/stats`.
+- Analytics affiliate cần dữ liệu import CSV hoặc event từ nguồn đối soát;
+  chưa tự gọi API của affiliate network.
 - Scheduler chạy in-process (APScheduler), chưa phân tán (Celery/Redis).
 - Chống prompt injection ở mức cơ bản (delimiter + system prompt).
 - SQLite vẫn là backend local mặc định; adapter/migration Supabase đã chuẩn bị,

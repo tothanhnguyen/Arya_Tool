@@ -10,10 +10,52 @@
 
 | Cua so | Task | Trang thai |
 |---|---|---|
-| 1 | Dashboard write forms | SAN SANG - chua co nguoi nhan |
-| 2 | Telegram notification va daily summary | SAN SANG - chua co nguoi nhan |
-| 3 | Supabase readiness va artifact storage | SAN SANG - chua co nguoi nhan |
-| 4 | Affiliate import va analytics | XONG - `/root`, 2026-07-28 |
+| 1 | Dashboard write forms | DA XONG - agent `dashboard_forms`, 2026-07-28 |
+| 2 | Telegram notification va daily summary | DA XONG - `/root`, 2026-07-28 |
+| 3 | Supabase readiness va artifact storage | DA XONG - agent `supabase_readiness`, 2026-07-28 |
+| 4 | Affiliate import va analytics | DA XONG - `/root`, 2026-07-28 |
+| 5 | CI test gate va CD container image | DA XONG - `/root`, 2026-07-28 |
+
+Quy uoc trang thai dung chung cho moi bang task:
+
+- `TASK TRONG`: chua co owner; terminal khac duoc phep nhan.
+- `DANG NHAN TASK`: da co owner va dang xu ly; terminal khac khong duoc sua
+  vung file cua task nay.
+- `DA XONG`: owner da hoan thanh, ghi ket qua/test/commit va khong con thay doi
+  dang do. Terminal tich hop van phai review gate truoc khi merge.
+
+Moi terminal phai cap nhat dong task tu `TASK TRONG` sang `DANG NHAN TASK`,
+kem ten agent va thoi diem, **truoc khi sua file**. Chi duoc nhan task dang
+`TASK TRONG`. Neu bo task, owner phai ghi ly do va dua trang thai ve
+`TASK TRONG`; khong de task mac ket o `DANG NHAN TASK`.
+
+Ket qua cua so 1:
+
+- Them form tao mock account, upload media, tao product/draft, approve,
+  schedule va cancel; toan bo POST co CSRF, loopback/API-key gate va owner
+  relation check.
+- MIME/size/input/state transition duoc validate; loi storage/auth khong bi
+  phan chieu ra HTML.
+- 30 focused test pass; social regression va Ruff pass.
+
+Ket qua cua so 2:
+
+- Gui Telegram cho `published`, terminal `failed`, checkpoint va auth-expired;
+  retry/deferred im lang de khong spam.
+- Terminal DB row la nguon retry ben vung sau send failure/restart; tracking
+  baseline tranh replay lich su cu.
+- Daily summary 20:00 theo `social_timezone` co same-day catch-up/retry sau gio
+  cau hinh; dedupe check/send/mark duoc serialize trong process va khoa row
+  tren Postgres.
+- 27 test notification/scheduler/worker/Telegram pass.
+
+Ket qua cua so 3:
+
+- Artifact Storage private, owner-scoped, deterministic key, signed URL ngan
+  han, compensation, deletion audit va reconciliation.
+- Them migration artifact/RLS, schema revision health fail-closed, ETL
+  inventory artifact/media va checklist cutover/rollback khong thay doi remote.
+- 21 focused test pass, 1 remote Postgres test skip dung thiet ke.
 
 Ket qua cua so 4:
 
@@ -21,10 +63,21 @@ Ket qua cua so 4:
   `post:<id>` va publish-job idempotency key trong `sub_id`.
 - `/stats` tach analytics service, loc theo owner va co top
   content/product/account/local-hour; EPC khong co click hien `—`, khong hien 0.
-- 9 test cua task pass; `ruff check .` va `git diff --check` pass.
-- Full suite: 398 pass, 1 test cu `test_daily_limit_defers_without_calling_publisher`
-  fail khi chay luc 00:xx Asia/Ho_Chi_Minh vi fixture "1 gio truoc" roi vao
-  ngay hom qua. Day la flaky test ngoai vung file cua cua so 4.
+- Money dung `Decimal`/`NUMERIC(18,6)`; event ID unique theo owner; duplicate
+  conflict/race rollback atomic; metadata co secret/resource-limit hardening.
+- `/stats` fail closed khi database co nhieu user ma chua co owner context.
+- 49 focused test importer/model/API/analytics/stats pass.
+
+Ket qua task 5:
+
+- Moi branch push va pull request vao `main` chay Ruff + full pytest offline.
+- Pull request/workflow thu cong build image read-only; chi push `main` hoac
+  tag `v*` moi co quyen publish `ghcr.io/tothanhnguyen/arya_tool`.
+- Image mac dinh bind `0.0.0.0:8010`, luu SQLite trong `/app/data`, chay bang
+  user khong phai root; build context loai secret/runtime data.
+- Workflow YAML va Compose config pass static gate. Full suite tich hop:
+  457 pass, 1 remote Postgres test skip; Docker daemon local dang tat nen image
+  build se duoc gate tren GitHub Actions truoc khi publish.
 
 ## 0. Trang thai xuat phat
 
@@ -258,13 +311,16 @@ Gate:
 
 ## 6. Luat phoi hop
 
-1. Moi cua so chi sua vung file duoc giao. Neu can sua file ngoai vung, dung
+1. Truoc khi bat dau, terminal doc bang task moi nhat va chi claim dong co
+   trang thai `TASK TRONG`. Viec claim phai doi trang thai thanh
+   `DANG NHAN TASK`, ghi owner/thoi diem va duoc luu truoc moi thay doi code.
+2. Moi cua so chi sua vung file duoc giao. Neu can sua file ngoai vung, dung
    lai va ghi de xuat trong commit message/bao cao, khong tu sua.
-2. Khong sua `PLAN_ARYA_TOOL.md` de tu danh dau xong; terminal tich hop cap nhat
+3. Khong sua `PLAN_ARYA_TOOL.md` de tu danh dau xong; terminal tich hop cap nhat
    plan sau khi verify.
-3. Khong commit `.env`, database, media, browser profile, report chua redact
+4. Khong commit `.env`, database, media, browser profile, report chua redact
    hoac Supabase temp state.
-4. Moi branch ket thuc bang:
+5. Moi branch ket thuc bang:
 
 ```bash
 .venv/bin/python -m pytest -q
@@ -274,7 +330,8 @@ git status --short
 git commit
 ```
 
-5. Cua so nao xong thi gui commit hash, danh sach test va cac viec co y de lai.
+6. Cua so nao xong thi ghi ket qua, commit hash, danh sach test va cac viec co
+   y de lai, sau do moi doi trang thai sang `DA XONG`.
 
 ## 7. Thu tu merge
 

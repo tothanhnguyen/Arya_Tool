@@ -12,6 +12,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from laplace.config import get_settings
@@ -36,6 +38,11 @@ from laplace.social.models import (
 MAX_CSV_BYTES = 10 * 1024 * 1024
 MAX_CSV_ROWS = 50_000
 QUERY_BATCH_SIZE = 500
+MAX_METADATA_BYTES = 16 * 1024
+MAX_METADATA_DEPTH = 8
+MAX_METADATA_ITEMS = 200
+MAX_NUMERIC_AMOUNT = Decimal("999999999999.999999")
+AMOUNT_QUANTUM = Decimal("0.000001")
 
 REQUIRED_COLUMNS = frozenset({"external_event_id", "event_type", "occurred_at"})
 OPTIONAL_COLUMNS = frozenset(
@@ -58,6 +65,43 @@ SUB_ID_RE = re.compile(
     r"^(?:(?:arya)[-_:])?(?P<kind>job|post)[-_:](?P<id>[1-9][0-9]*)$",
     re.IGNORECASE,
 )
+SENSITIVE_METADATA_KEYS = frozenset(
+    {
+        "api_key",
+        "auth",
+        "authentication",
+        "authorization",
+        "cookie",
+        "password",
+        "secret",
+        "token",
+    }
+)
+
+
+def _event_signature(
+    *,
+    event_type: str,
+    amount: Decimal,
+    currency: str,
+    social_post_id: int | None,
+    affiliate_product_id: int | None,
+    social_account_id: int | None,
+    publish_job_id: int | None,
+    occurred_at: datetime,
+    metadata_json: dict[str, Any] | None,
+) -> tuple[Any, ...]:
+    return (
+        event_type,
+        amount,
+        currency,
+        social_post_id,
+        affiliate_product_id,
+        social_account_id,
+        publish_job_id,
+        occurred_at,
+        json.dumps(metadata_json or {}, ensure_ascii=False, sort_keys=True),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,16 +152,16 @@ class _ParsedEvent:
         return self.source, self.external_event_id
 
     def signature(self) -> tuple[Any, ...]:
-        return (
-            self.event_type,
-            self.amount,
-            self.currency,
-            self.social_post_id,
-            self.affiliate_product_id,
-            self.social_account_id,
-            self.publish_job_id,
-            self.occurred_at,
-            json.dumps(self.metadata_json, ensure_ascii=False, sort_keys=True),
+        return _event_signature(
+            event_type=self.event_type,
+            amount=self.amount,
+            currency=self.currency,
+            social_post_id=self.social_post_id,
+            affiliate_product_id=self.affiliate_product_id,
+            social_account_id=self.social_account_id,
+            publish_job_id=self.publish_job_id,
+            occurred_at=self.occurred_at,
+            metadata_json=self.metadata_json,
         )
 
 
@@ -298,18 +342,66 @@ def _money(raw: str, event_type: str) -> Decimal:
         raise ValueError("commission rows require amount > 0")
     if event_type != "commission" and amount != 0:
         raise ValueError("view/click rows require amount = 0")
-    return amount
+    if amount > MAX_NUMERIC_AMOUNT:
+        raise ValueError("amount exceeds NUMERIC(18,6) range")
+    try:
+        normalized = amount.quantize(AMOUNT_QUANTUM)
+    except InvalidOperation as exc:
+        raise ValueError("amount exceeds NUMERIC(18,6) precision") from exc
+    if normalized != amount:
+        raise ValueError("amount exceeds NUMERIC(18,6) scale")
+    return normalized
+
+
+def _metadata_key_is_sensitive(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+    parts = {part for part in normalized.split("_") if part}
+    compact = normalized.replace("_", "")
+    if parts & SENSITIVE_METADATA_KEYS:
+        return True
+    if any(marker in compact for marker in ("token", "cookie", "password", "secret", "apikey")):
+        return True
+    return compact.startswith("auth") and not compact.startswith("author")
+
+
+def _validate_metadata_tree(
+    value: Any,
+    *,
+    depth: int,
+    item_count: list[int],
+) -> None:
+    if isinstance(value, (dict, list)) and depth > MAX_METADATA_DEPTH:
+        raise ValueError(f"metadata_json exceeds maximum depth {MAX_METADATA_DEPTH}")
+    if isinstance(value, dict):
+        item_count[0] += len(value)
+        if item_count[0] > MAX_METADATA_ITEMS:
+            raise ValueError(f"metadata_json exceeds {MAX_METADATA_ITEMS} items")
+        for key, child in value.items():
+            if _metadata_key_is_sensitive(key):
+                raise ValueError("metadata_json contains a sensitive key")
+            _validate_metadata_tree(child, depth=depth + 1, item_count=item_count)
+    elif isinstance(value, list):
+        item_count[0] += len(value)
+        if item_count[0] > MAX_METADATA_ITEMS:
+            raise ValueError(f"metadata_json exceeds {MAX_METADATA_ITEMS} items")
+        for child in value:
+            _validate_metadata_tree(child, depth=depth + 1, item_count=item_count)
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("metadata_json contains a non-finite number")
 
 
 def _metadata(raw: str) -> dict[str, Any]:
     if not raw.strip():
         return {}
+    if len(raw.encode("utf-8")) > MAX_METADATA_BYTES:
+        raise ValueError(f"metadata_json exceeds {MAX_METADATA_BYTES} bytes")
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError("metadata_json must be valid JSON") from exc
     if not isinstance(value, dict):
         raise TypeError("metadata_json must contain a JSON object")
+    _validate_metadata_tree(value, depth=1, item_count=[0])
     return value
 
 
@@ -443,9 +535,10 @@ def _parse_row(
 
 def _existing_keys(
     session: Session,
+    user_id: int,
     keys: set[tuple[str, str]],
-) -> dict[tuple[str, str], int]:
-    existing: dict[tuple[str, str], int] = {}
+) -> dict[tuple[str, str], tuple[Any, ...]]:
+    existing: dict[tuple[str, str], tuple[Any, ...]] = {}
     by_source: dict[str, list[str]] = {}
     for source, event_id in keys:
         by_source.setdefault(source, []).append(event_id)
@@ -456,15 +549,40 @@ def _existing_keys(
                 select(
                     AffiliateEvent.source,
                     AffiliateEvent.external_event_id,
-                    AffiliateEvent.user_id,
+                    AffiliateEvent.event_type,
+                    AffiliateEvent.amount,
+                    AffiliateEvent.currency,
+                    AffiliateEvent.social_post_id,
+                    AffiliateEvent.affiliate_product_id,
+                    AffiliateEvent.social_account_id,
+                    AffiliateEvent.publish_job_id,
+                    AffiliateEvent.occurred_at,
+                    AffiliateEvent.metadata_json,
                 ).where(
+                    AffiliateEvent.user_id == user_id,
                     AffiliateEvent.source == source,
                     AffiliateEvent.external_event_id.in_(batch),
                 )
             )
             for row in rows:
                 if row.external_event_id is not None:
-                    existing[(row.source, row.external_event_id)] = row.user_id
+                    occurred_at = row.occurred_at
+                    if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+                        occurred_at = occurred_at.replace(tzinfo=UTC)
+                    else:
+                        occurred_at = occurred_at.astimezone(UTC)
+                    signature = _event_signature(
+                        event_type=row.event_type,
+                        amount=Decimal(str(row.amount or 0)),
+                        currency=row.currency,
+                        social_post_id=row.social_post_id,
+                        affiliate_product_id=row.affiliate_product_id,
+                        social_account_id=row.social_account_id,
+                        publish_job_id=row.publish_job_id,
+                        occurred_at=occurred_at,
+                        metadata_json=row.metadata_json,
+                    )
+                    existing[(row.source, row.external_event_id)] = signature
     return existing
 
 
@@ -563,20 +681,21 @@ def import_affiliate_csv(
         else:
             duplicate_count += 1
 
-    existing = _existing_keys(session, set(unique))
+    existing = _existing_keys(session, user_id, set(unique))
     new_events: list[_ParsedEvent] = []
     for key, event in unique.items():
-        owner_id = existing.get(key)
-        if owner_id is None:
+        stored = existing.get(key)
+        if stored is None:
             new_events.append(event)
-        elif owner_id == user_id:
+            continue
+        if stored == event.signature():
             duplicate_count += 1
         else:
             issues.append(
                 ImportIssue(
                     event.row,
                     "external_event_id",
-                    "event identifier is already in use",
+                    "event identifier conflicts with existing data",
                 )
             )
 
@@ -591,27 +710,45 @@ def import_affiliate_csv(
             issues=tuple(issues),
         )
 
-    if not dry_run:
-        session.add_all(
-            [
-                AffiliateEvent(
-                    user_id=event.user_id,
-                    event_type=event.event_type,
-                    amount=float(event.amount),
-                    currency=event.currency,
-                    source=event.source,
-                    external_event_id=event.external_event_id,
-                    social_post_id=event.social_post_id,
-                    affiliate_product_id=event.affiliate_product_id,
-                    social_account_id=event.social_account_id,
-                    publish_job_id=event.publish_job_id,
-                    occurred_at=event.occurred_at,
-                    metadata_json=event.metadata_json,
+    if not dry_run and new_events:
+        try:
+            with session.begin_nested():
+                session.add_all(
+                    [
+                        AffiliateEvent(
+                            user_id=event.user_id,
+                            event_type=event.event_type,
+                            amount=event.amount,
+                            currency=event.currency,
+                            source=event.source,
+                            external_event_id=event.external_event_id,
+                            social_post_id=event.social_post_id,
+                            affiliate_product_id=event.affiliate_product_id,
+                            social_account_id=event.social_account_id,
+                            publish_job_id=event.publish_job_id,
+                            occurred_at=event.occurred_at,
+                            metadata_json=event.metadata_json,
+                        )
+                        for event in new_events
+                    ]
                 )
-                for event in new_events
-            ]
-        )
-        session.flush()
+                session.flush()
+        except IntegrityError:
+            return AffiliateImportReport(
+                user_id=user_id,
+                rows_total=rows_total,
+                imported=0,
+                ready=0,
+                skipped_duplicates=duplicate_count,
+                dry_run=False,
+                issues=(
+                    ImportIssue(
+                        1,
+                        "file",
+                        "affiliate event batch conflicted during atomic insert; retry",
+                    ),
+                ),
+            )
 
     return AffiliateImportReport(
         user_id=user_id,

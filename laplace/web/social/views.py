@@ -1,14 +1,17 @@
-"""Read-only social dashboard views for the affiliate MVP."""
+"""Local dashboard forms for the reviewed social publishing workflow."""
 
 import secrets
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from starlette.datastructures import UploadFile
 
 from laplace.config import get_settings
 from laplace.db import session_scope
@@ -32,6 +35,19 @@ from laplace.tools.social_content import SocialContentParams
 from laplace.tools.social_content import social_content as run_social_content
 from laplace.web.deps import require_api_key
 from laplace.web.settings_page import CSRF_TOKEN, require_loopback
+from laplace.web.social.api import (
+    AffiliateProductIn,
+    DraftIn,
+    MockAccountIn,
+    ScheduleIn,
+    UserActionIn,
+)
+from laplace.web.social.api import cancel_job as cancel_job_api
+from laplace.web.social.api import create_affiliate_product as create_product_api
+from laplace.web.social.api import create_draft as create_draft_api
+from laplace.web.social.api import create_mock_account as create_mock_account_api
+from laplace.web.social.api import schedule_content as schedule_content_api
+from laplace.web.social.api import upload_media as upload_media_api
 
 _SOCIAL_TEMPLATES_DIR = Path(__file__).parent / "templates"
 _SHARED_TEMPLATES_DIR = Path(__file__).parents[1] / "templates"
@@ -50,6 +66,8 @@ router = APIRouter(
 )
 
 _SCHEDULED_STATUSES = ("queued", "retry")
+_CANCELLABLE_STATUSES = ("queued", "retry", "failed")
+_SAFE_STATUS_CODES = frozenset({400, 404, 409, 413, 415})
 
 
 def _page_context(active_social_nav: str, **values: object) -> dict[str, object]:
@@ -58,6 +76,90 @@ def _page_context(active_social_nav: str, **values: object) -> dict[str, object]
         "active_social_nav": active_social_nav,
         **values,
     }
+
+
+def _verify_csrf(form: object) -> None:
+    token = str(form.get("csrf", ""))  # type: ignore[union-attr]
+    if not secrets.compare_digest(token, CSRF_TOKEN):
+        raise HTTPException(status_code=403, detail="CSRF token sai hoặc thiếu.")
+
+
+def _positive_int(value: object, label: str) -> int:
+    try:
+        parsed = int(str(value or ""))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} phải là số nguyên dương.",
+        ) from exc
+    if parsed <= 0:
+        raise HTTPException(status_code=400, detail=f"{label} phải là số nguyên dương.")
+    return parsed
+
+
+def _public_text(value: object, label: str, max_length: int) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or len(normalized) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} phải có từ 1 đến {max_length} ký tự.",
+        )
+    if any(ord(character) < 32 and character not in "\n\t" for character in normalized):
+        raise HTTPException(status_code=400, detail=f"{label} chứa ký tự không hợp lệ.")
+    return normalized
+
+
+def _optional_positive_int(value: object, label: str) -> int | None:
+    normalized = str(value or "").strip()
+    return _positive_int(normalized, label) if normalized else None
+
+
+def _hashtags(value: object) -> list[str]:
+    raw = str(value or "").strip()
+    if len(raw) > 1_000:
+        raise HTTPException(status_code=400, detail="Hashtag vượt giới hạn nhập liệu.")
+    tags = raw.replace(",", " ").split()
+    if len(tags) > 30 or any(len(tag.lstrip("#")) > 64 for tag in tags):
+        raise HTTPException(status_code=400, detail="Hashtag không hợp lệ.")
+    return tags
+
+
+def _form_values(form: object, *names: str) -> dict[str, str]:
+    return {
+        name: str(form.get(name, ""))  # type: ignore[union-attr]
+        for name in names
+    }
+
+
+def _safe_form_error(exc: Exception, fallback: str) -> tuple[str, int]:
+    """Return a public message without reflecting storage/auth exception text."""
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code if exc.status_code in _SAFE_STATUS_CODES else 502
+        if status_code == 404:
+            return "Không tìm thấy dữ liệu thuộc workspace user đã chọn.", status_code
+        if status_code == 413:
+            return "File vượt giới hạn dung lượng cho phép.", status_code
+        if status_code == 415:
+            return "File không đúng định dạng JPEG, PNG, WebP hoặc MP4.", status_code
+        if status_code == 409:
+            return fallback, status_code
+        return "Dữ liệu form chưa hợp lệ.", status_code
+    if isinstance(exc, (ValidationError, ValueError, ZoneInfoNotFoundError)):
+        return "Dữ liệu form chưa hợp lệ.", 400
+    return fallback, 502
+
+
+def _parse_schedule(value: object) -> datetime:
+    raw = _public_text(value, "Thời gian đăng", 64)
+    try:
+        scheduled_at = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Thời gian đăng không hợp lệ.") from exc
+    if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
+        scheduled_at = scheduled_at.replace(
+            tzinfo=ZoneInfo(get_settings().social_timezone)
+        )
+    return scheduled_at
 
 
 def get_content_generation_service() -> ContentGenerationService:
@@ -69,6 +171,7 @@ def _content_context(
     generated_post_id: int | None = None,
     error: str | None = None,
     form_values: dict[str, str] | None = None,
+    notice: str | None = None,
 ) -> dict[str, object]:
     with session_scope() as session:
         rows = session.execute(
@@ -143,10 +246,154 @@ def _content_context(
         styles=[style.public_dict() for style in STYLES.values()],
         generated_post=generated_post,
         error=error,
+        notice=notice,
         form_values=form_values or {},
         csrf_token=CSRF_TOKEN,
         content_model=get_settings().social_content_model,
         openrouter_ready=bool(get_settings().openrouter_api_key),
+    )
+
+
+def _accounts_context(
+    *,
+    error: str | None = None,
+    form_values: dict[str, str] | None = None,
+    notice: str | None = None,
+) -> dict[str, object]:
+    with session_scope() as session:
+        rows = session.execute(
+            select(
+                SocialAccount.id,
+                SocialAccount.user_id,
+                SocialAccount.display_name,
+                SocialAccount.platform,
+                SocialAccount.auth_type,
+                SocialAccount.status,
+                SocialAccount.daily_post_limit,
+                SocialAccount.timezone,
+                SocialAccount.last_checked_at,
+            ).order_by(SocialAccount.display_name, SocialAccount.id)
+        ).mappings().all()
+        accounts = [dict(row) for row in rows]
+        users = [
+            {"id": row.id, "label": f"User #{row.id}"}
+            for row in session.execute(select(User.id).order_by(User.id)).all()
+        ]
+    return _page_context(
+        "accounts",
+        accounts=accounts,
+        users=users,
+        csrf_token=CSRF_TOKEN,
+        error=error,
+        notice=notice,
+        form_values=form_values or {},
+    )
+
+
+def _calendar_context(
+    *,
+    error: str | None = None,
+    form_values: dict[str, str] | None = None,
+    notice: str | None = None,
+) -> dict[str, object]:
+    with session_scope() as session:
+        rows = session.execute(
+            select(
+                PublishJob.id,
+                PublishJob.status,
+                PublishJob.scheduled_at,
+                PublishJob.attempt_count,
+                SocialPost.user_id,
+                SocialPost.title.label("post_title"),
+                SocialAccount.display_name.label("account_name"),
+                SocialAccount.platform,
+            )
+            .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+            .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+            .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
+            .order_by(PublishJob.scheduled_at, PublishJob.id)
+        ).mappings().all()
+        jobs = [dict(row) for row in rows]
+        posts = [
+            dict(row)
+            for row in session.execute(
+                select(
+                    SocialPost.id,
+                    SocialPost.user_id,
+                    SocialPost.title,
+                    SocialPost.status,
+                )
+                .where(SocialPost.status.in_(("approved", "published")))
+                .order_by(SocialPost.updated_at.desc(), SocialPost.id.desc())
+            ).mappings()
+        ]
+        accounts = [
+            dict(row)
+            for row in session.execute(
+                select(
+                    SocialAccount.id,
+                    SocialAccount.user_id,
+                    SocialAccount.display_name,
+                    SocialAccount.platform,
+                )
+                .where(SocialAccount.status == "active")
+                .order_by(SocialAccount.display_name, SocialAccount.id)
+            ).mappings()
+        ]
+        users = [
+            {"id": row.id, "label": f"User #{row.id}"}
+            for row in session.execute(select(User.id).order_by(User.id)).all()
+        ]
+    return _page_context(
+        "calendar",
+        jobs=jobs,
+        posts=posts,
+        accounts=accounts,
+        users=users,
+        csrf_token=CSRF_TOKEN,
+        schedule_timezone=get_settings().social_timezone,
+        error=error,
+        notice=notice,
+        form_values=form_values or {},
+    )
+
+
+def _jobs_context(
+    *,
+    status_filter: str | None = None,
+    error: str | None = None,
+    notice: str | None = None,
+) -> dict[str, object]:
+    statement = (
+        select(
+            PublishJob.id,
+            PublishJob.status,
+            PublishJob.scheduled_at,
+            PublishJob.attempt_count,
+            PublishJob.remote_post_id,
+            PublishJob.published_at,
+            SocialPost.user_id,
+            SocialPost.title.label("post_title"),
+            SocialAccount.display_name.label("account_name"),
+            SocialAccount.platform,
+        )
+        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+        .order_by(PublishJob.created_at.desc(), PublishJob.id.desc())
+    )
+    if status_filter:
+        statement = statement.where(PublishJob.status == status_filter)
+    with session_scope() as session:
+        rows = session.execute(statement).mappings().all()
+        jobs = [dict(row) for row in rows]
+    return _page_context(
+        "jobs",
+        jobs=jobs,
+        status_filter=status_filter,
+        csrf_token=CSRF_TOKEN,
+        cancellable_statuses=_CANCELLABLE_STATUSES,
+        error=error,
+        notice=notice,
     )
 
 
@@ -205,41 +452,220 @@ def social_overview(request: Request) -> HTMLResponse:
 
 
 @router.get("/accounts", response_class=HTMLResponse, name="social_accounts")
-def social_accounts(request: Request) -> HTMLResponse:
-    """List safe account metadata; authentication references are never queried."""
-    with session_scope() as session:
-        rows = session.execute(
-            select(
-                SocialAccount.id,
-                SocialAccount.display_name,
-                SocialAccount.platform,
-                SocialAccount.auth_type,
-                SocialAccount.status,
-                SocialAccount.daily_post_limit,
-                SocialAccount.timezone,
-                SocialAccount.last_checked_at,
-            ).order_by(SocialAccount.display_name, SocialAccount.id)
-        ).mappings().all()
-        accounts = [dict(row) for row in rows]
-
+def social_accounts(
+    request: Request,
+    created: bool = Query(default=False),
+) -> HTMLResponse:
+    """List safe account metadata and expose a credential-free mock form."""
     return templates.TemplateResponse(
         request,
         "social_accounts.html",
-        _page_context("accounts", accounts=accounts),
+        _accounts_context(
+            notice="Đã tạo mock account." if created else None,
+        ),
     )
+
+
+@router.post(
+    "/accounts/mock",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def create_mock_account(request: Request):
+    form = await request.form()
+    form_values = _form_values(
+        form,
+        "user_id",
+        "platform",
+        "display_name",
+        "external_id",
+    )
+    try:
+        _verify_csrf(form)
+        body = MockAccountIn(
+            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            platform=_public_text(form.get("platform"), "Platform", 32),
+            display_name=_public_text(form.get("display_name"), "Tên hiển thị", 200),
+            external_id=_public_text(form.get("external_id"), "External ID", 255),
+        )
+        create_mock_account_api(body)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể tạo mock account.")
+        return templates.TemplateResponse(
+            request,
+            "social_accounts.html",
+            _accounts_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể tạo mock account.")
+        return templates.TemplateResponse(
+            request,
+            "social_accounts.html",
+            _accounts_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/accounts?created=true", status_code=303)
 
 
 @router.get("/content", response_class=HTMLResponse, name="social_content")
 def social_content(
     request: Request,
     generated: int | None = Query(default=None, gt=0),
+    created: str | None = Query(default=None, max_length=16),
 ) -> HTMLResponse:
     """Content Studio: generate reviewed drafts and list the content library."""
+    notice_by_action = {
+        "media": "Đã lưu media.",
+        "product": "Đã tạo affiliate product.",
+        "draft": "Đã tạo draft thủ công.",
+        "approved": "Đã duyệt nội dung.",
+    }
     return templates.TemplateResponse(
         request,
         "social_content.html",
-        _content_context(generated_post_id=generated),
+        _content_context(
+            generated_post_id=generated,
+            notice=notice_by_action.get(created or ""),
+        ),
     )
+
+
+@router.post(
+    "/media",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def upload_social_media(request: Request):
+    form = await request.form()
+    form_values = _form_values(form, "user_id")
+    try:
+        _verify_csrf(form)
+        user_id = _positive_int(form.get("user_id"), "Workspace user")
+        file = form.get("file")
+        if not isinstance(file, UploadFile):
+            raise HTTPException(status_code=400, detail="Cần chọn file media.")
+        await upload_media_api(user_id=user_id, file=file)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể lưu media.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể lưu media.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/content?created=media", status_code=303)
+
+
+@router.post(
+    "/products",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def create_affiliate_product(request: Request):
+    form = await request.form()
+    names = (
+        "user_id",
+        "network",
+        "merchant",
+        "product_name",
+        "product_url",
+        "affiliate_url",
+    )
+    form_values = _form_values(form, *names)
+    try:
+        _verify_csrf(form)
+        body = AffiliateProductIn(
+            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            network=_public_text(form.get("network"), "Affiliate network", 64),
+            merchant=_public_text(form.get("merchant"), "Merchant", 200),
+            product_name=_public_text(form.get("product_name"), "Tên sản phẩm", 500),
+            product_url=_public_text(form.get("product_url"), "Product URL", 2_000),
+            affiliate_url=_public_text(form.get("affiliate_url"), "Affiliate URL", 2_000),
+        )
+        create_product_api(body)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể tạo affiliate product.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể tạo affiliate product.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/content?created=product", status_code=303)
+
+
+@router.post(
+    "/content/drafts",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def create_social_draft(request: Request):
+    form = await request.form()
+    names = (
+        "user_id",
+        "title",
+        "caption",
+        "hashtags",
+        "media_asset_id",
+        "affiliate_product_id",
+    )
+    form_values = _form_values(form, *names)
+    try:
+        _verify_csrf(form)
+        body = DraftIn(
+            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            title=_public_text(form.get("title"), "Tiêu đề", 300),
+            caption=_public_text(form.get("caption"), "Caption", 10_000),
+            hashtags=_hashtags(form.get("hashtags")),
+            media_asset_id=_positive_int(form.get("media_asset_id"), "Media"),
+            affiliate_product_id=_optional_positive_int(
+                form.get("affiliate_product_id"),
+                "Affiliate product",
+            ),
+        )
+        create_draft_api(body)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể tạo draft.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể tạo draft.")
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/content?created=draft", status_code=303)
 
 
 @router.post(
@@ -271,11 +697,24 @@ async def generate_social_content(request: Request):
             get_content_generation_service().generate_draft,
             body,
         )
-    except (ValidationError, ValueError, MissingAPIKeyError) as exc:
+    except MissingAPIKeyError:
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=str(exc), form_values=form_values),
+            _content_context(
+                error="Copywriter chưa được cấu hình; chưa tạo draft.",
+                form_values=form_values,
+            ),
+            status_code=400,
+        )
+    except (ValidationError, ValueError):
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(
+                error="Dữ liệu tạo draft chưa hợp lệ.",
+                form_values=form_values,
+            ),
             status_code=400,
         )
     except Exception:
@@ -308,9 +747,14 @@ async def approve_social_content(request: Request, post_id: int):
             status_code=403,
         )
     try:
-        user_id = int(str(form.get("user_id", "0")))
-    except ValueError:
-        user_id = 0
+        user_id = _positive_int(form.get("user_id"), "Workspace user")
+    except HTTPException:
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(error="Dữ liệu form chưa hợp lệ."),
+            status_code=400,
+        )
     result = run_social_content(
         SocialContentParams(action="approve", post_id=post_id),
         ToolContext(user_id=user_id),
@@ -319,73 +763,169 @@ async def approve_social_content(request: Request, post_id: int):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=result.error or "Không thể duyệt draft."),
+            _content_context(error="Không thể duyệt draft ở trạng thái hiện tại."),
             status_code=409,
         )
-    return RedirectResponse(url="/social/content", status_code=303)
+    return RedirectResponse(url="/social/content?created=approved", status_code=303)
 
 
 @router.get("/calendar", response_class=HTMLResponse, name="social_calendar")
-def social_calendar(request: Request) -> HTMLResponse:
-    """List queued and retrying publish jobs in chronological order."""
-    with session_scope() as session:
-        rows = session.execute(
-            select(
-                PublishJob.id,
-                PublishJob.status,
-                PublishJob.scheduled_at,
-                PublishJob.attempt_count,
-                SocialPost.title.label("post_title"),
-                SocialAccount.display_name.label("account_name"),
-                SocialAccount.platform,
-            )
-            .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
-            .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
-            .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
-            .order_by(PublishJob.scheduled_at, PublishJob.id)
-        ).mappings().all()
-        jobs = [dict(row) for row in rows]
-
+def social_calendar(
+    request: Request,
+    changed: str | None = Query(default=None, max_length=16),
+) -> HTMLResponse:
+    """Schedule reviewed content and list upcoming jobs."""
+    notice_by_action = {
+        "scheduled": "Đã thêm bài vào lịch đăng.",
+        "cancelled": "Đã hủy publish job.",
+    }
     return templates.TemplateResponse(
         request,
         "social_calendar.html",
-        _page_context("calendar", jobs=jobs),
+        _calendar_context(notice=notice_by_action.get(changed or "")),
     )
+
+
+@router.post(
+    "/calendar/schedule",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def schedule_social_content(request: Request):
+    form = await request.form()
+    names = ("user_id", "social_post_id", "social_account_id", "scheduled_at")
+    form_values = _form_values(form, *names)
+    try:
+        _verify_csrf(form)
+        body = ScheduleIn(
+            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            social_post_id=_positive_int(form.get("social_post_id"), "Nội dung"),
+            social_account_id=_positive_int(
+                form.get("social_account_id"),
+                "Social account",
+            ),
+            scheduled_at=_parse_schedule(form.get("scheduled_at")),
+        )
+        schedule_content_api(body)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(
+            exc,
+            "Không thể lên lịch với owner hoặc trạng thái đã chọn.",
+        )
+        return templates.TemplateResponse(
+            request,
+            "social_calendar.html",
+            _calendar_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(
+            exc,
+            "Không thể lên lịch với owner hoặc trạng thái đã chọn.",
+        )
+        return templates.TemplateResponse(
+            request,
+            "social_calendar.html",
+            _calendar_context(error=error, form_values=form_values),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/calendar?changed=scheduled", status_code=303)
+
+
+def _cancel_publish_job(job_id: int, user_id: int) -> None:
+    cancel_job_api(job_id, UserActionIn(user_id=user_id))
+
+
+@router.post(
+    "/calendar/jobs/{job_id}/cancel",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def cancel_calendar_job(request: Request, job_id: int):
+    form = await request.form()
+    try:
+        _verify_csrf(form)
+        _cancel_publish_job(
+            job_id,
+            _positive_int(form.get("user_id"), "Workspace user"),
+        )
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể hủy publish job.")
+        return templates.TemplateResponse(
+            request,
+            "social_calendar.html",
+            _calendar_context(error=error),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể hủy publish job.")
+        return templates.TemplateResponse(
+            request,
+            "social_calendar.html",
+            _calendar_context(error=error),
+            status_code=status_code,
+        )
+    return RedirectResponse(url="/social/calendar?changed=cancelled", status_code=303)
 
 
 @router.get("/jobs", response_class=HTMLResponse, name="social_jobs")
 def social_jobs(
     request: Request,
     status: str | None = Query(default=None, max_length=24),
+    changed: str | None = Query(default=None, max_length=16),
 ) -> HTMLResponse:
     """List publish history, optionally filtered by its exact status."""
-    statement = (
-        select(
-            PublishJob.id,
-            PublishJob.status,
-            PublishJob.scheduled_at,
-            PublishJob.attempt_count,
-            PublishJob.remote_post_id,
-            PublishJob.published_at,
-            SocialPost.title.label("post_title"),
-            SocialAccount.display_name.label("account_name"),
-            SocialAccount.platform,
-        )
-        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
-        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
-        .order_by(PublishJob.created_at.desc(), PublishJob.id.desc())
-    )
-    if status:
-        statement = statement.where(PublishJob.status == status)
-
-    with session_scope() as session:
-        rows = session.execute(statement).mappings().all()
-        jobs = [dict(row) for row in rows]
-
     return templates.TemplateResponse(
         request,
         "social_jobs.html",
-        _page_context("jobs", jobs=jobs, status_filter=status),
+        _jobs_context(
+            status_filter=status,
+            notice="Đã hủy publish job." if changed == "cancelled" else None,
+        ),
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_loopback)],
+)
+async def cancel_history_job(request: Request, job_id: int):
+    form = await request.form()
+    status_filter = str(form.get("status_filter", "")).strip() or None
+    if status_filter and len(status_filter) > 24:
+        status_filter = None
+    try:
+        _verify_csrf(form)
+        _cancel_publish_job(
+            job_id,
+            _positive_int(form.get("user_id"), "Workspace user"),
+        )
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        error, status_code = _safe_form_error(exc, "Không thể hủy publish job.")
+        return templates.TemplateResponse(
+            request,
+            "social_jobs.html",
+            _jobs_context(status_filter=status_filter, error=error),
+            status_code=status_code,
+        )
+    except Exception as exc:
+        error, status_code = _safe_form_error(exc, "Không thể hủy publish job.")
+        return templates.TemplateResponse(
+            request,
+            "social_jobs.html",
+            _jobs_context(status_filter=status_filter, error=error),
+            status_code=status_code,
+        )
+    return RedirectResponse(
+        url="/social/jobs?changed=cancelled",
+        status_code=303,
     )
 
 

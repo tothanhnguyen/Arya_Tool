@@ -37,7 +37,8 @@
 
 - D1. `LAPLACE_WEB_HOST` config: mặc định `127.0.0.1` (an toàn), ngày demo đổi `0.0.0.0` — 30'.
 - D2. Deploy VPS (T17 PLAN.md): docker compose đã sẵn, chỉ cần VPS + .env — 1 buổi.
-- D3. CI GitHub Actions: pytest + ruff mỗi push — 30', repo đã public trên GitHub.
+- D3. ✅ CI/CD GitHub Actions: pytest + ruff mỗi push, Docker build cho PR và
+  publish GHCR chỉ trên `main`/tag `v*`.
 
 ## Thứ tự đề xuất trong tuần này
 

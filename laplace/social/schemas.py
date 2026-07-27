@@ -1,6 +1,7 @@
 """Pydantic contracts and enums for social publishing."""
 
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal, Self
 
@@ -335,7 +336,13 @@ class PublishAttemptRead(ORMModel):
 class AffiliateEventCreate(BaseModel):
     user_id: int = Field(gt=0)
     event_type: AffiliateEventType
-    amount: float = Field(default=0, ge=0)
+    amount: Decimal = Field(
+        default=Decimal(0),
+        ge=0,
+        max_digits=18,
+        decimal_places=6,
+        allow_inf_nan=False,
+    )
     currency: str = Field(default="VND", min_length=3, max_length=8)
     source: str = Field(default="manual", min_length=1, max_length=64)
     external_event_id: str | None = Field(default=None, max_length=255)
@@ -363,7 +370,7 @@ class AffiliateEventRead(ORMModel):
     id: int
     user_id: int
     event_type: AffiliateEventType
-    amount: float
+    amount: Decimal
     currency: str
     source: str
     external_event_id: str | None

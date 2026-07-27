@@ -1,7 +1,38 @@
 {% extends "base.html" %}
 
 {% block title %}Calendar · Social Affiliate{% endblock %}
-{% block head %}{% include "_social_styles.html" %}{% endblock %}
+{% block head %}
+  {% include "_social_styles.html" %}
+  <style>
+    .schedule-panel {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px; align-items: end; margin-bottom: 22px; padding: 16px;
+      border: 1px solid var(--line); border-radius: var(--r-md);
+      background: var(--paper); box-shadow: var(--shadow-1);
+    }
+    .schedule-fields {
+      display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px;
+    }
+    .schedule-field label {
+      display: block; margin-bottom: 4px; color: var(--muted);
+      font-size: 10.5px; font-weight: 650; letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .schedule-field input, .schedule-field select {
+      width: 100%; padding: 8px 10px; color: var(--ink); background: var(--paper);
+      border: 1px solid var(--line); border-radius: var(--r-sm); font: 13px var(--sans);
+    }
+    .schedule-note { margin: -12px 0 10px; color: var(--muted); font-size: 11.5px; }
+    .notice.err { border-style: dashed; }
+    @media (max-width: 900px) {
+      .schedule-panel { grid-template-columns: 1fr; align-items: stretch; }
+      .schedule-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .schedule-fields { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
 
 {% block content %}
   <main aria-labelledby="social-page-title">
@@ -10,6 +41,70 @@
       <span class="count">{{ jobs | length }} upcoming</span>
     </div>
     {% include "_social_nav.html" %}
+
+    {% if error %}
+      <div class="notice err" role="alert">{{ error }}</div>
+    {% elif notice %}
+      <div class="notice" role="status">{{ notice }}</div>
+    {% endif %}
+
+    <section aria-labelledby="schedule-title">
+      <h2 id="schedule-title">Lên lịch nội dung đã duyệt</h2>
+      <p class="schedule-note">
+        Thời gian không có offset được hiểu theo {{ schedule_timezone }}.
+        Owner của user, nội dung và account phải khớp nhau.
+      </p>
+      <form class="schedule-panel" method="post" action="/social/calendar/schedule">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <div class="schedule-fields">
+          <div class="schedule-field">
+            <label for="schedule-user-id">Workspace user</label>
+            <select id="schedule-user-id" name="user_id" required>
+              <option value="">Chọn user</option>
+              {% for user in users %}
+                <option value="{{ user.id }}"
+                  {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                  {{ user.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="schedule-field">
+            <label for="schedule-post-id">Nội dung</label>
+            <select id="schedule-post-id" name="social_post_id" required>
+              <option value="">Chọn nội dung đã duyệt</option>
+              {% for post in posts %}
+                <option value="{{ post.id }}"
+                  {% if form_values.social_post_id == post.id|string %}selected{% endif %}>
+                  User #{{ post.user_id }} · {{ post.title }} · {{ post.status }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="schedule-field">
+            <label for="schedule-account-id">Account</label>
+            <select id="schedule-account-id" name="social_account_id" required>
+              <option value="">Chọn account active</option>
+              {% for account in accounts %}
+                <option value="{{ account.id }}"
+                  {% if form_values.social_account_id == account.id|string %}selected{% endif %}>
+                  User #{{ account.user_id }} · {{ account.display_name }} · {{ account.platform }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="schedule-field">
+            <label for="scheduled-at">Thời gian đăng</label>
+            <input id="scheduled-at" type="datetime-local" name="scheduled_at" required
+                   value="{{ form_values.scheduled_at or '' }}">
+          </div>
+        </div>
+        <button class="btn-ghost" type="submit"
+                {% if not users or not posts or not accounts %}disabled{% endif %}>
+          Lên lịch
+        </button>
+      </form>
+    </section>
 
     {% if jobs %}
       <div class="table-card">
@@ -22,6 +117,7 @@
                 <th scope="col">Content</th>
                 <th scope="col">Account</th>
                 <th scope="col">Status</th>
+                <th scope="col"><span class="sr-only">Thao tác</span></th>
               </tr>
             </thead>
             <tbody>
@@ -34,6 +130,13 @@
                     <span class="sub">{{ job.platform }}</span>
                   </td>
                   <td><span class="status-text">{{ job.status }}</span></td>
+                  <td>
+                    <form method="post" action="/social/calendar/jobs/{{ job.id }}/cancel">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="user_id" value="{{ job.user_id }}">
+                      <button class="btn-ghost" type="submit">Hủy</button>
+                    </form>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>

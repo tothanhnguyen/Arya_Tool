@@ -11,6 +11,9 @@ dist/
 
 # Secrets & du lieu runtime — TUYET DOI khong dua vao image
 .env
+.env.*
+**/.env
+**/.env.*
 *.db
 *.db-wal
 *.db-shm
@@ -18,6 +21,11 @@ dist/
 data/
 reports/
 eval_results/
+media/
+imports/
+backups/
+supabase/.branches/
+supabase/.temp/
 
 # Khong can cho container chay bot (eval/test chay o local)
 tests/
