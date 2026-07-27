@@ -11,9 +11,22 @@
 | Cua so | Task | Trang thai |
 |---|---|---|
 | 1 | Dashboard write forms | SAN SANG - chua co nguoi nhan |
-| 2 | Telegram notification va daily summary | SAN SANG - chua co nguoi nhan |
+| 2 | Telegram notification va daily summary | XONG - `/root`, 2026-07-28 |
 | 3 | Supabase readiness va artifact storage | SAN SANG - chua co nguoi nhan |
 | 4 | Affiliate import va analytics | XONG - `/root`, 2026-07-28 |
+
+Ket qua cua so 2:
+
+- Gui Telegram cho `published`, terminal `failed`, checkpoint va auth-expired;
+  retry/deferred im lang de khong spam.
+- Dedupe ben vung qua `User.profile_json`; chi danh dau sau khi delivery thanh
+  cong, nen restart khong gui trung va loi Telegram van retry duoc.
+- Daily summary 20:00 theo `social_timezone`, loc tung owner va khong can token
+  that trong test.
+- 12 test lien quan pass; `ruff check .` va `git diff --check` pass.
+- Regression: 403 pass khi bo flaky test
+  `test_daily_limit_defers_without_calling_publisher`; test nay van fail luc
+  00:xx Asia/Ho_Chi_Minh do fixture "1 gio truoc" roi vao ngay hom qua.
 
 Ket qua cua so 4:
 
