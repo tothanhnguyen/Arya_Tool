@@ -309,3 +309,4 @@ Giới hạn của MVP:
 
 Roadmap chi tiết theo tuần (kiến trúc, eval harness 2 chiến lược × 2 model, hardening, deploy): xem [PLAN.md](PLAN.md).
 # Laplace-Demon-Beta
+# Arya_Tool
