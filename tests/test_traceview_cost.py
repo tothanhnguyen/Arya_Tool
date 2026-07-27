@@ -4,14 +4,14 @@ Danh sach task: cot token + cost per-task va dong tong toan he thong.
 Trang chi tiet: cac tile LLM calls / tokens / cost tu helper task_usage (T9).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from laplace.models import LLMCall, Task, User
 from laplace.web.app import create_app
 
-T0 = datetime(2026, 1, 1, 12, 0, 0)
+T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _seed(session) -> tuple[int, int]:

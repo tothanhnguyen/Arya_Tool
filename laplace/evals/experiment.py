@@ -199,6 +199,24 @@ def _summaries(rows: list[dict[str, Any]],
     return out
 
 
+def _compare_metric(
+    react: dict[str, Any],
+    plan: dict[str, Any],
+    metric: str,
+    label: str,
+    lower_better: bool,
+) -> str:
+    rv, pv = react.get(metric), plan.get(metric)
+    if rv is None or pv is None:
+        return f"- **{label}**: thiếu số liệu ({metric}: react={rv}, plan={pv})."
+    plan_wins = (pv < rv) if lower_better else (pv > rv)
+    winner = "plan_execute" if plan_wins else ("react" if pv != rv else "hòa")
+    return (
+        f"- **{label}** ({metric}): react={rv} vs plan_execute={pv}"
+        f" → nghiêng về `{winner}`."
+    )
+
+
 def _hypothesis_section(summaries: dict[str, dict[str, Any]],
                         meta: dict[str, Any]) -> list[str]:
     """Doi chieu gia thuyet: Plan-Execute it buoc/re hon vs ReAct phuc hoi tot hon.
@@ -214,22 +232,69 @@ def _hypothesis_section(summaries: dict[str, dict[str, Any]],
             continue
         lines += ["", f"## Đối chiếu giả thuyết — `{provider}`", ""]
 
-        def cmp(metric: str, label: str, lower_better: bool) -> str:
-            rv, pv = react.get(metric), plan.get(metric)
-            if rv is None or pv is None:
-                return f"- **{label}**: thiếu số liệu ({metric}: react={rv}, plan={pv})."
-            plan_wins = (pv < rv) if lower_better else (pv > rv)
-            winner = "plan_execute" if plan_wins else ("react" if pv != rv else "hòa")
-            return (f"- **{label}** ({metric}): react={rv} vs plan_execute={pv}"
-                    f" → nghiêng về `{winner}`.")
-
-        lines.append(cmp("avg_steps", "Ít bước hơn (kỳ vọng: plan_execute)", True))
-        lines.append(cmp("avg_llm_calls", "Ít lượt gọi LLM hơn (kỳ vọng: plan_execute)", True))
-        lines.append(cmp("avg_cost_usd", "Rẻ hơn (kỳ vọng: plan_execute)", True))
-        lines.append(cmp("avg_tokens", "Ít token hơn (kỳ vọng: plan_execute)", True))
-        lines.append(cmp("recovery_rate", "Phục hồi lỗi tốt hơn (kỳ vọng: react)", False))
-        lines.append(cmp("success_rate", "Success rate tổng thể", False))
-        lines.append(cmp("avg_self_corrections", "Ít self-correction hơn", True))
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "avg_steps",
+                "Ít bước hơn (kỳ vọng: plan_execute)",
+                True,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "avg_llm_calls",
+                "Ít lượt gọi LLM hơn (kỳ vọng: plan_execute)",
+                True,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "avg_cost_usd",
+                "Rẻ hơn (kỳ vọng: plan_execute)",
+                True,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "avg_tokens",
+                "Ít token hơn (kỳ vọng: plan_execute)",
+                True,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "recovery_rate",
+                "Phục hồi lỗi tốt hơn (kỳ vọng: react)",
+                False,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "success_rate",
+                "Success rate tổng thể",
+                False,
+            )
+        )
+        lines.append(
+            _compare_metric(
+                react,
+                plan,
+                "avg_self_corrections",
+                "Ít self-correction hơn",
+                True,
+            )
+        )
 
         steps_ok = (plan.get("avg_steps") or 0) < (react.get("avg_steps") or 0)
         cost_ok = (plan.get("avg_cost_usd") or 0) < (react.get("avg_cost_usd") or 0)
@@ -241,11 +306,13 @@ def _hypothesis_section(summaries: dict[str, dict[str, Any]],
             rec_r is not None and rec_p is not None) else "thiếu số liệu"
         lines += [
             "",
-            f"**Kết luận**: Giả thuyết \"Plan-Execute ít bước/rẻ hơn\" {verdict1} "
-            f"(avg_steps {react.get('avg_steps')}→{plan.get('avg_steps')}, "
-            f"avg_cost_usd {react.get('avg_cost_usd')}→{plan.get('avg_cost_usd')}); "
-            f"giả thuyết \"ReAct phục hồi lỗi tốt hơn\" {verdict2} "
-            f"(recovery_rate react={rec_r} vs plan_execute={rec_p}).",
+            (
+                f"**Kết luận**: Giả thuyết \"Plan-Execute ít bước/rẻ hơn\" {verdict1} "
+                f"(avg_steps {react.get('avg_steps')}→{plan.get('avg_steps')}, "
+                f"avg_cost_usd {react.get('avg_cost_usd')}→{plan.get('avg_cost_usd')}); "
+                f"giả thuyết \"ReAct phục hồi lỗi tốt hơn\" {verdict2} "
+                f"(recovery_rate react={rec_r} vs plan_execute={rec_p})."
+            ),
         ]
     return lines
 
@@ -264,8 +331,10 @@ def _write_report(exp_dir: Path, meta: dict[str, Any],
         "",
         f"- Thời điểm: {meta['timestamp']}" + (" (partial — bị ngắt giữa chừng)"
                                                if meta.get("partial") else ""),
-        f"- Số case: {meta['n_cases']} · Run/cấu hình: {meta['runs']}"
-        f" · Model: {meta['models']}",
+        (
+            f"- Số case: {meta['n_cases']} · Run/cấu hình: {meta['runs']}"
+            f" · Model: {meta['models']}"
+        ),
         "",
         "## Bảng so sánh metric",
         "",
@@ -344,7 +413,7 @@ def make_charts(exp_dir: Path, summaries: dict[str, dict[str, Any]],
         for spine in ("top", "right", "left"):
             ax.spines[spine].set_visible(False)
         ax.spines["bottom"].set_color(_BASELINE)
-        if key.endswith("_rate") or key.endswith("accuracy"):
+        if key.endswith(("_rate", "accuracy")):
             ax.set_ylim(0, 1.12)
         else:
             ax.set_ylim(bottom=0)

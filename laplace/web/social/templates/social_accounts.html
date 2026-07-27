@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Accounts · Social Affiliate{% endblock %}
+{% block head %}{% include "_social_styles.html" %}{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="social-page-title">
+    <div class="page-head">
+      <h1 id="social-page-title">Accounts</h1>
+      <span class="count">{{ accounts | length }} connected</span>
+    </div>
+    {% include "_social_nav.html" %}
+
+    {% if accounts %}
+      <div class="table-card">
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Danh sách tài khoản social đã kết nối</caption>
+            <thead>
+              <tr>
+                <th scope="col">Account</th>
+                <th scope="col">Platform</th>
+                <th scope="col">Auth mode</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">Daily limit</th>
+                <th scope="col">Timezone</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for account in accounts %}
+                <tr>
+                  <td class="primary">{{ account.display_name }}</td>
+                  <td>{{ account.platform }}</td>
+                  <td>{{ account.auth_type }}</td>
+                  <td><span class="status-text">{{ account.status }}</span></td>
+                  <td class="num">{{ account.daily_post_limit }}</td>
+                  <td class="nowrap">{{ account.timezone }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty" role="status">
+        Chưa kết nối Page hoặc tài khoản nào.
+        <div class="hint">Account credentials sẽ được quản lý ngoài dashboard.</div>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

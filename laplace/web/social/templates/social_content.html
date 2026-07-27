@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}Content Studio · Arya_Tool{% endblock %}
+{% block head %}
+  {% include "_social_styles.html" %}
+  <style>
+    .studio-grid {
+      display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
+      gap: 16px; align-items: start;
+    }
+    .studio-form {
+      background: var(--paper); border: 1px solid var(--line);
+      border-radius: var(--r-md); box-shadow: var(--shadow-1);
+      padding: 16px;
+    }
+    .studio-fields {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+    }
+    .studio-field.full { grid-column: 1 / -1; }
+    .studio-field label {
+      display: block; margin-bottom: 4px; color: var(--muted);
+      font-size: 10.5px; font-weight: 650; letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .studio-field input,
+    .studio-field select,
+    .studio-field textarea {
+      width: 100%; padding: 8px 10px; color: var(--ink);
+      background: var(--paper); border: 1px solid var(--line);
+      border-radius: var(--r-sm); font: 13px/1.5 var(--sans);
+    }
+    .studio-field textarea { min-height: 112px; resize: vertical; }
+    .studio-field input:focus,
+    .studio-field select:focus,
+    .studio-field textarea:focus {
+      outline: 2px solid var(--ink); outline-offset: 1px;
+    }
+    .studio-action {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-top: 14px;
+    }
+    .model-note { color: var(--muted); font: 11px var(--mono); }
+    .model-note.ready { color: var(--ink); }
+    .style-list { display: grid; gap: 8px; }
+    .style-card {
+      padding: 10px 12px; border: 1px solid var(--line);
+      border-radius: var(--r-sm); background: var(--paper);
+    }
+    .style-card strong { font-size: 12.5px; }
+    .style-card p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .style-meta { margin-top: 5px; color: var(--faint); font: 10.5px var(--mono); }
+    .preview {
+      border: 1.5px solid var(--ink); border-radius: var(--r-md);
+      background: var(--paper); padding: 16px; margin: 18px 0;
+    }
+    .preview-head {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .preview-title { margin: 0 0 8px; font-size: 18px; }
+    .preview-copy { white-space: pre-wrap; color: var(--ink-2); }
+    .preview-tags { margin-top: 10px; color: var(--muted); font-family: var(--mono); }
+    .preview-actions { margin-top: 14px; display: flex; gap: 8px; }
+    .ai-meta {
+      display: block; margin-top: 3px; color: var(--faint);
+      font: 10.5px var(--mono);
+    }
+    .notice.err { border-style: dashed; }
+    @media (max-width: 820px) {
+      .studio-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .studio-fields { grid-template-columns: 1fr; }
+      .studio-field.full { grid-column: auto; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="social-page-title">
+    <div class="page-head">
+      <h1 id="social-page-title">Content Studio</h1>
+      <span class="count">{{ posts | length }} items · human approval required</span>
+    </div>
+    {% include "_social_nav.html" %}
+
+    {% if error %}
+      <div class="notice err">{{ error }}</div>
+    {% endif %}
+
+    <div class="studio-grid">
+      <section aria-labelledby="generator-title">
+        <h2 id="generator-title">Tạo draft bằng AI</h2>
+        <form class="studio-form" method="post" action="/social/content/generate">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <div class="studio-fields">
+            <div class="studio-field">
+              <label for="user_id">Workspace user</label>
+              <select id="user_id" name="user_id" required>
+                <option value="">Chọn user</option>
+                {% for user in users %}
+                  <option value="{{ user.id }}"
+                    {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                    {{ user.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="platform">Nền tảng</label>
+              <select id="platform" name="platform">
+                {% for platform in ("facebook", "instagram", "tiktok") %}
+                  <option value="{{ platform }}"
+                    {% if form_values.platform == platform %}selected{% endif %}>
+                    {{ platform }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="affiliate_product_id">Sản phẩm</label>
+              <select id="affiliate_product_id" name="affiliate_product_id" required>
+                <option value="">Chọn sản phẩm</option>
+                {% for product in products %}
+                  <option value="{{ product.id }}"
+                    {% if form_values.affiliate_product_id == product.id|string %}selected{% endif %}>
+                    {{ product.product_name }} · {{ product.merchant }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="media_asset_id">Ảnh/video</label>
+              <select id="media_asset_id" name="media_asset_id" required>
+                <option value="">Chọn media</option>
+                {% for media in media_assets %}
+                  <option value="{{ media.id }}"
+                    {% if form_values.media_asset_id == media.id|string %}selected{% endif %}>
+                    {{ media.original_name }} · {{ media.type }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="style_id">Văn phong</label>
+              <select id="style_id" name="style_id" required>
+                {% for style in styles %}
+                  <option value="{{ style.id }}"
+                    {% if form_values.style_id == style.id %}selected{% endif %}>
+                    {{ style.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="audience">Đối tượng đọc</label>
+              <input id="audience" name="audience" required maxlength="500"
+                     value="{{ form_values.audience or '' }}"
+                     placeholder="Ví dụ: người làm văn phòng">
+            </div>
+            <div class="studio-field full">
+              <label for="product_facts">Dữ kiện sản phẩm đã kiểm tra</label>
+              <textarea id="product_facts" name="product_facts" required maxlength="4000"
+                        placeholder="Thông số, ưu điểm, nhược điểm, điều kiện giá/khuyến mãi có nguồn...">{{ form_values.product_facts or '' }}</textarea>
+            </div>
+          </div>
+          <div class="studio-action">
+            <span class="model-note{% if openrouter_ready %} ready{% endif %}">
+              {% if openrouter_ready %}
+                OpenRouter key sẵn sàng · {{ content_model }}
+              {% else %}
+                Chưa có OpenRouter key · sẽ dùng {{ content_model }} sau khi cấu hình
+              {% endif %}
+            </span>
+            <button class="btn-ghost" type="submit"
+                    {% if not users or not products or not media_assets %}disabled{% endif %}>
+              Tạo draft
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <aside aria-labelledby="styles-title">
+        <h2 id="styles-title">Preset văn phong</h2>
+        <div class="style-list">
+          {% for style in styles %}
+            <article class="style-card">
+              <strong>{{ style.name }}</strong>
+              <p>{{ style.description }}</p>
+              <div class="style-meta">
+                {{ style.min_chars }}–{{ style.max_chars }} ký tự ·
+                ≤ {{ style.max_hashtags }} hashtag · ≤ {{ style.max_emojis }} emoji
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </aside>
+    </div>
+
+    {% if generated_post %}
+      <section class="preview" aria-labelledby="preview-title">
+        <div class="preview-head">
+          <span class="badge st-pending">draft mới</span>
+          <span class="model-note">
+            {{ generated_post.style_id }} · {{ generated_post.generation_model }}
+          </span>
+        </div>
+        <h2 id="preview-title" class="preview-title">{{ generated_post.title }}</h2>
+        <div class="preview-copy">{{ generated_post.caption }}</div>
+        <div class="preview-tags">{{ generated_post.hashtags_json | join(" ") }}</div>
+        <div class="preview-actions">
+          <form method="post" action="/social/content/{{ generated_post.id }}/approve">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="user_id" value="{{ generated_post.user_id }}">
+            <button class="btn-ghost" type="submit">Duyệt nội dung</button>
+          </form>
+        </div>
+      </section>
+    {% endif %}
+
+    <h2>Content library</h2>
+    {% if posts %}
+      <div class="table-card">
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Nội dung social và sản phẩm affiliate</caption>
+            <thead>
+              <tr>
+                <th scope="col">Content</th>
+                <th scope="col">Media</th>
+                <th scope="col">Affiliate product</th>
+                <th scope="col">Status</th>
+                <th scope="col"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for post in posts %}
+                <tr>
+                  <td class="primary">
+                    {{ post.title }}
+                    <span class="sub caption-preview">{{ post.caption }}</span>
+                    {% if post.style_id %}
+                      <span class="ai-meta">
+                        AI · {{ post.style_id }} · {{ post.generation_model }}
+                      </span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {{ post.media_name }}
+                    <span class="sub">{{ post.media_type }}</span>
+                  </td>
+                  <td>
+                    {% if post.product_name %}
+                      {{ post.product_name }}
+                      <span class="sub">{{ post.network }}</span>
+                    {% else %}
+                      <span class="muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td><span class="status-text">{{ post.status }}</span></td>
+                  <td>
+                    {% if post.status == "draft" %}
+                      <form method="post" action="/social/content/{{ post.id }}/approve">
+                        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="user_id" value="{{ post.user_id }}">
+                        <button class="btn-ghost" type="submit">Duyệt</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty" role="status">
+        Kho nội dung đang trống.
+        <div class="hint">Chọn sản phẩm, media và văn phong để tạo draft đầu tiên.</div>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

@@ -6,7 +6,7 @@
 
 - [ ] `.env`: `LAPLACE_LLM_PROVIDER=gemini` + key còn quota (kiểm tra bằng 1 task thử), `LAPLACE_TELEGRAM_BOT_TOKEN` đúng bot demo, `LAPLACE_SEARCH_API_KEY` (Tavily) còn hạn.
 - [ ] Chạy `python -m laplace`, nhắn thử bot 1 câu → trả lời bình thường, **không có prefix `[mock]`**.
-- [ ] Mở sẵn 2 cửa sổ: Telegram (chat với bot, phóng to chữ) và trình duyệt tab http://localhost:8000/ (trace viewer).
+- [ ] Mở sẵn 2 cửa sổ: Telegram (chat với bot, phóng to chữ) và trình duyệt tab http://localhost:8010/ (trace viewer).
 - [ ] **Đã chạy trước 4 use case ở nhà** và backup `laplace.db` → có trace sẵn cho phương án replay (mục 6). Ghi lại 4 task id vào tờ nháp/note.
 - [ ] Video dự phòng nằm sẵn trên máy (không phụ thuộc mạng), đã thử mở.
 - [ ] Tắt notification máy, bật Do Not Disturb; sạc pin; nếu được thì phát 4G từ điện thoại làm mạng dự phòng cho Telegram.
@@ -71,7 +71,7 @@ Chế độ replay phát lại timeline từ trace **đã lưu trong DB, hoàn t
 
 1. Nói thẳng: "Mất mạng là rủi ro em đã dự phòng — hệ thống có chế độ replay phát lại trace thật đã chạy, đúng dữ liệu, đúng nhịp thời gian."
 2. Nếu app chưa chạy: khôi phục DB backup (`cp laplace.db.demo-backup laplace.db`) rồi `python -m laplace` (không cần key).
-3. Mở `http://localhost:8000/tasks/<id>/replay` cho từng use case:
+3. Mở `http://localhost:8010/tasks/<id>/replay` cho từng use case:
    - **Kể chuyện từng bước**: bấm **Next/Prev** (`?upto=N` tăng dần) — dừng ở đúng các điểm giải thích của mục 1–4.
    - **Chạy như thật**: thêm `?auto=1&speed=2` — tự phát theo latency thật (tốc độ 1x/2x/4x/8x), phù hợp khi muốn vừa chạy vừa nói.
 4. Nội dung thuyết minh giữ nguyên như mục 1–4 (điểm dừng, câu nói) — chỉ khác là nhìn timeline phát lại thay vì chờ bot chạy thật.

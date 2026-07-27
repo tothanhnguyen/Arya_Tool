@@ -27,6 +27,12 @@ from laplace.web.traceview import templates
 # Chi cho phep truy cap tu chinh may dang chay server.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+SOCIAL_CONTENT_TARGET = "social_content"
+SOCIAL_CONTENT_PROVIDER = "openrouter"
+SOCIAL_CONTENT_MODEL = "openrouter/free"
+SOCIAL_CONTENT_PROVIDER_ENV = "LAPLACE_SOCIAL_CONTENT_PROVIDER"
+SOCIAL_CONTENT_MODEL_ENV = "LAPLACE_SOCIAL_CONTENT_MODEL"
+
 
 # Token per-process: form phai gui lai dung token nay (chong CSRF, lop 3).
 # Sinh moi lan khoi dong — trang web ngoai khong doc duoc (SOP), form that thi co.
@@ -100,6 +106,10 @@ def _page_context(
     lines = llm_setup.read_env_lines(llm_setup.ENV_PATH)
     current_provider = llm_setup.get_env_value(lines, "LAPLACE_LLM_PROVIDER") or "mock"
     current_model = llm_setup.get_env_value(lines, "LAPLACE_LLM_MODEL")
+    content_provider = (
+        llm_setup.get_env_value(lines, SOCIAL_CONTENT_PROVIDER_ENV) or SOCIAL_CONTENT_PROVIDER
+    )
+    content_model = llm_setup.get_env_value(lines, SOCIAL_CONTENT_MODEL_ENV) or SOCIAL_CONTENT_MODEL
     providers = []
     for p in PRESETS.values():
         raw = llm_setup.get_env_value(lines, p.env_key) if p.env_key else None
@@ -116,10 +126,19 @@ def _page_context(
                 "is_current": p.name == current_provider,
             }
         )
+    content_key_status = next(
+        provider for provider in providers if provider["name"] == SOCIAL_CONTENT_PROVIDER
+    )
     return {
         "providers": providers,
         "current_provider": current_provider,
         "current_model": current_model,
+        "content_writer": {
+            "provider": content_provider,
+            "model": content_model,
+            "has_key": content_key_status["has_key"],
+            "masked_key": content_key_status["masked_key"],
+        },
         "selected": selected or current_provider,
         "error": error,
         "success": success,
@@ -148,9 +167,19 @@ async def settings_save(request: Request):
     # khong doc duoc token nay do same-origin policy).
     if not secrets.compare_digest(form.get("csrf", ""), CSRF_TOKEN):
         raise HTTPException(status_code=403, detail="CSRF token sai hoac thieu.")
-    provider = form.get("provider", "")
+    target = form.get("target", "agent")
+    if target not in {"agent", SOCIAL_CONTENT_TARGET}:
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            _page_context(error=f"Target '{target}' khong ton tai."),
+            status_code=400,
+        )
+
+    is_content_writer = target == SOCIAL_CONTENT_TARGET
+    provider = SOCIAL_CONTENT_PROVIDER if is_content_writer else form.get("provider", "")
     api_key = form.get("api_key", "").strip()
-    model = form.get("model", "").strip()
+    model = SOCIAL_CONTENT_MODEL if is_content_writer else form.get("model", "").strip()
     preset = PRESETS.get(provider)
     if preset is None:
         return templates.TemplateResponse(
@@ -159,6 +188,12 @@ async def settings_save(request: Request):
             _page_context(error=f"Provider '{provider}' khong ton tai."),
             status_code=400,
         )
+
+    # Form copywriter cho phep bam lai Validate khi key da co trong .env. Raw key
+    # chi ton tai trong local variable de goi provider, khong dua vao context.
+    if is_content_writer and not api_key and preset.env_key:
+        lines = llm_setup.read_env_lines(llm_setup.ENV_PATH)
+        api_key = llm_setup.get_env_value(lines, preset.env_key) or ""
     if preset.requires_key and not api_key:
         return templates.TemplateResponse(
             request,
@@ -195,9 +230,13 @@ async def settings_save(request: Request):
     lines = llm_setup.read_env_lines(llm_setup.ENV_PATH)
     if preset.env_key:
         lines = llm_setup.set_env_line(lines, preset.env_key, api_key)
-    lines = llm_setup.set_env_line(lines, "LAPLACE_LLM_PROVIDER", preset.name)
-    if model:
-        lines = llm_setup.set_env_line(lines, "LAPLACE_LLM_MODEL", model)
+    if is_content_writer:
+        lines = llm_setup.set_env_line(lines, SOCIAL_CONTENT_PROVIDER_ENV, SOCIAL_CONTENT_PROVIDER)
+        lines = llm_setup.set_env_line(lines, SOCIAL_CONTENT_MODEL_ENV, SOCIAL_CONTENT_MODEL)
+    else:
+        lines = llm_setup.set_env_line(lines, "LAPLACE_LLM_PROVIDER", preset.name)
+        if model:
+            lines = llm_setup.set_env_line(lines, "LAPLACE_LLM_MODEL", model)
     llm_setup.write_env(llm_setup.ENV_PATH, lines, backup=True)
 
     return templates.TemplateResponse(
@@ -211,6 +250,7 @@ async def settings_save(request: Request):
                 "model": live_model,
                 "masked_key": mask_key(api_key) if preset.requires_key else None,
                 "override_model": model or None,
+                "target": target,
             },
             selected=preset.name,
         ),

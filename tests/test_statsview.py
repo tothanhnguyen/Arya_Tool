@@ -1,80 +1,152 @@
-"""Test trang thong ke /stats: co du lieu va DB trong."""
+"""Tests for affiliate traffic and commission analytics."""
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from laplace.models import LLMCall
-from laplace.schemas import ToolResult
-from laplace.services.tasks import create_task, get_or_create_user
-from laplace.services.trace import record_step
+from laplace.models import User
+from laplace.social.models import (
+    AffiliateEvent,
+    AffiliateProduct,
+    MediaAsset,
+    SocialAccount,
+    SocialPost,
+)
 
 
 @pytest.fixture()
 def client(session):
     from laplace.web.app import create_app
 
-    with TestClient(create_app(), follow_redirects=False) as c:
-        yield c
+    with TestClient(create_app(), follow_redirects=False) as test_client:
+        yield test_client
 
 
-def _seed_task(
-    session,
-    days_ago: int,
-    status: str,
-    tool: str = "web_search",
-    step_status: str = "ok",
-) -> int:
-    user = get_or_create_user(session)
-    task = create_task(session, user_id=user.id, request="viec thong ke")
-    task.status = status
-    created = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_ago)
-    task.created_at = created
-    record_step(
-        session,
-        task.id,
-        0,
-        tool,
-        {"q": "x"},
-        observation=ToolResult(ok=(step_status != "error")),
-        status=step_status,
+def _seed_affiliate_events(session) -> None:
+    user = User()
+    session.add(user)
+    session.flush()
+    account = SocialAccount(
+        user_id=user.id,
+        platform="facebook",
+        display_name="Page Analytics",
+        external_id="page-analytics",
+        auth_type="mock",
+        auth_ref="mock://page-analytics",
     )
-    session.add(
-        LLMCall(
-            task_id=task.id,
-            purpose="answer",
-            provider="mock",
-            prompt_tokens=120,
-            completion_tokens=30,
-            cost_usd=0.0015,
-            latency_ms=800,
-            created_at=created,
+    product = AffiliateProduct(
+        user_id=user.id,
+        network="Demo",
+        merchant="Merchant",
+        product_name="Sản phẩm Analytics",
+        product_url="https://example.test/product",
+        affiliate_url="https://example.test/go",
+    )
+    media = MediaAsset(
+        user_id=user.id,
+        type="image",
+        local_path="/tmp/product.png",
+        original_name="product.png",
+        mime_type="image/png",
+        size_bytes=100,
+        sha256="a" * 64,
+    )
+    session.add_all([account, product, media])
+    session.flush()
+    post = SocialPost(
+        user_id=user.id,
+        title="Review sản phẩm A",
+        caption="Caption",
+        hashtags_json=[],
+        media_asset_id=media.id,
+        affiliate_product_id=product.id,
+        status="published",
+        content_hash="b" * 64,
+    )
+    session.add(post)
+    session.flush()
+    occurred_at = datetime.now(UTC) - timedelta(hours=1)
+    events = [
+        AffiliateEvent(
+            user_id=user.id,
+            social_post_id=post.id,
+            affiliate_product_id=product.id,
+            social_account_id=account.id,
+            event_type="view",
+            occurred_at=occurred_at,
         )
+        for _ in range(10)
+    ]
+    events.extend(
+        AffiliateEvent(
+            user_id=user.id,
+            social_post_id=post.id,
+            affiliate_product_id=product.id,
+            social_account_id=account.id,
+            event_type="click",
+            occurred_at=occurred_at,
+        )
+        for _ in range(4)
     )
+    events.extend(
+        [
+            AffiliateEvent(
+                user_id=user.id,
+                social_post_id=post.id,
+                affiliate_product_id=product.id,
+                social_account_id=account.id,
+                event_type="commission",
+                amount=30_000,
+                currency="VND",
+                occurred_at=occurred_at,
+            ),
+            AffiliateEvent(
+                user_id=user.id,
+                social_post_id=post.id,
+                affiliate_product_id=product.id,
+                social_account_id=account.id,
+                event_type="commission",
+                amount=20_000,
+                currency="VND",
+                occurred_at=occurred_at,
+            ),
+        ]
+    )
+    session.add_all(events)
     session.commit()
-    return task.id
 
 
-def test_stats_page_with_data(session, client):
-    _seed_task(session, days_ago=0, status="done", tool="web_search")
-    _seed_task(session, days_ago=2, status="failed", tool="python_exec", step_status="error")
+def test_stats_page_shows_affiliate_funnel(session, client):
+    _seed_affiliate_events(session)
 
-    r = client.get("/stats")
-    assert r.status_code == 200
-    assert "Top tools" in r.text
-    assert "<svg" in r.text
-    # Ten tool da seed xuat hien (trong chart va bang fallback)
-    assert "web_search" in r.text
-    assert "python_exec" in r.text
-    # Moi chart co bang du lieu fallback
-    assert "Bảng dữ liệu" in r.text
-    # Hatch pattern cho failed/loi (khong phan biet chi bang do xam)
-    assert "hatch-failed" in r.text
+    response = client.get("/stats")
+
+    assert response.status_code == 200
+    assert "Affiliate Analytics" in response.text
+    assert "Lượt xem" in response.text
+    assert "Lượt bấm" in response.text
+    assert "CTR" in response.text
+    assert "40.0%" in response.text
+    assert "50,000 ₫" in response.text
+    assert "12,500 ₫" in response.text
+    assert "2 lượt ghi nhận" in response.text
+    assert "Review sản phẩm A" in response.text
+    assert "Sản phẩm Analytics" in response.text
+    assert "Page Analytics" in response.text
+    assert "Top khung giờ" in response.text
+    assert "Asia/Ho_Chi_Minh" in response.text
+    assert "Token theo ngày" not in response.text
+    assert "Top tools" not in response.text
+    assert 'href="/evals"' not in response.text
 
 
 def test_stats_empty_db(client):
-    r = client.get("/stats")
-    assert r.status_code == 200
-    assert 'class="empty"' in r.text
-    assert "Chưa có dữ liệu" in r.text
+    response = client.get("/stats")
+
+    assert response.status_code == 200
+    assert 'class="empty"' in response.text
+    assert "Chưa có dữ liệu traffic hoặc hoa hồng." in response.text
+    assert "Lượt xem" in response.text
+    assert "Lượt bấm" in response.text
+    assert "Hoa hồng / click" in response.text

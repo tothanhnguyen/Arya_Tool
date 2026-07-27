@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Social Affiliate · Arya_Tool{% endblock %}
+
+{% block head %}
+  {% include "_social_styles.html" %}
+{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="social-page-title">
+    <div class="page-head">
+      <h1 id="social-page-title">Social Affiliate</h1>
+      <span class="count">local workspace</span>
+    </div>
+
+    {% include "_social_nav.html" %}
+
+    <section aria-labelledby="social-summary-title">
+      <h2 id="social-summary-title">Workspace summary</h2>
+      <div class="totals">
+        {% for card in summary_cards %}
+          <article class="tile">
+            <a class="summary-link" href="{{ card.href }}"
+               aria-label="{{ card.label }}: {{ card.value }}. {{ card.description }}">
+              <div class="k">{{ card.label }}</div>
+              <div class="v">{{ card.value }}</div>
+              <div class="summary-description">{{ card.description }}</div>
+            </a>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section aria-labelledby="social-start-title">
+      <h2 id="social-start-title">Getting started</h2>
+      {% if summary_cards | map(attribute="value") | sum == 0 %}
+        <div class="empty" role="status">
+          <div class="getting-started">
+            <strong>Workspace social chưa có dữ liệu.</strong>
+            <div class="hint">
+              Kết nối Page, thêm nội dung đã duyệt, rồi lên lịch bài đăng đầu tiên.
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div class="card">
+          <div class="card-body">
+            Workspace đã sẵn sàng. Dùng Content để kiểm tra nội dung và Calendar để theo dõi
+            các bài sắp đăng.
+          </div>
+        </div>
+      {% endif %}
+    </section>
+  </main>
+{% endblock %}

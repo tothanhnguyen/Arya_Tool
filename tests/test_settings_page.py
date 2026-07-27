@@ -13,7 +13,11 @@ from markupsafe import escape
 from laplace.llm import setup as llm_setup
 from laplace.llm.presets import PRESETS
 from laplace.web.app import create_app
-from laplace.web.settings_page import CSRF_TOKEN
+from laplace.web.settings_page import (
+    CSRF_TOKEN,
+    SOCIAL_CONTENT_MODEL,
+    SOCIAL_CONTENT_PROVIDER,
+)
 
 LOOPBACK = ("127.0.0.1", 50000)
 LAN_HOST = ("1.2.3.4", 123)
@@ -57,6 +61,11 @@ def test_get_form_renders_all_8_providers(client):
     assert "Chọn làm provider" in html
     # Dong nhac restart
     assert "restart" in html
+    # Copywriter co config rieng, khong phu thuoc provider cua agent.
+    assert f"LAPLACE_SOCIAL_CONTENT_PROVIDER={SOCIAL_CONTENT_PROVIDER}" in html
+    assert f"LAPLACE_SOCIAL_CONTENT_MODEL={SOCIAL_CONTENT_MODEL}" in html
+    assert "50 request/ngày" in html
+    assert "chất lượng, độ trễ" in html
 
 
 def test_get_form_masks_existing_key(client, env_path):
@@ -108,7 +117,12 @@ def test_post_live_key_writes_env_600(client, env_path, monkeypatch):
     monkeypatch.setattr(llm_setup, "validate_key", lambda *a, **k: (123, "llama-3.3"))
     resp = client.post(
         "/settings",
-        data={"csrf": CSRF_TOKEN, "provider": "groq", "api_key": FULL_KEY, "model": "llama-3.1-8b-instant"},
+        data={
+            "csrf": CSRF_TOKEN,
+            "provider": "groq",
+            "api_key": FULL_KEY,
+            "model": "llama-3.1-8b-instant",
+        },
     )
     assert resp.status_code == 200
     # Ket qua validate hien tren trang
@@ -121,6 +135,78 @@ def test_post_live_key_writes_env_600(client, env_path, monkeypatch):
     assert "LAPLACE_LLM_MODEL=llama-3.1-8b-instant" in content
     assert (env_path.stat().st_mode & 0o777) == 0o600
     # Key day du KHONG xuat hien trong HTML tra ve (chi mask)
+    assert FULL_KEY not in resp.text
+    assert "sk-sec..." in resp.text
+
+
+def test_post_content_writer_writes_separate_free_config(client, env_path, monkeypatch):
+    env_path.write_text("LAPLACE_LLM_PROVIDER=groq\nLAPLACE_LLM_MODEL=llama-3.1-8b-instant\n")
+
+    def _validate(preset, api_key, model):
+        assert preset.name == SOCIAL_CONTENT_PROVIDER
+        assert api_key == FULL_KEY
+        assert model == SOCIAL_CONTENT_MODEL
+        return 42, SOCIAL_CONTENT_MODEL
+
+    monkeypatch.setattr(llm_setup, "validate_key", _validate)
+    resp = client.post(
+        "/settings",
+        data={
+            "csrf": CSRF_TOKEN,
+            "target": "social_content",
+            "api_key": FULL_KEY,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "Copywriter sẵn sàng" in resp.text
+    assert FULL_KEY not in resp.text
+    assert "sk-sec..." in resp.text
+    content = env_path.read_text()
+    assert f"LAPLACE_OPENROUTER_API_KEY={FULL_KEY}" in content
+    assert f"LAPLACE_SOCIAL_CONTENT_PROVIDER={SOCIAL_CONTENT_PROVIDER}" in content
+    assert f"LAPLACE_SOCIAL_CONTENT_MODEL={SOCIAL_CONTENT_MODEL}" in content
+    # Cau hinh copywriter khong thay provider/model cua agent chinh.
+    assert "LAPLACE_LLM_PROVIDER=groq" in content
+    assert "LAPLACE_LLM_MODEL=llama-3.1-8b-instant" in content
+
+
+def test_post_content_writer_reuses_masked_existing_key(client, env_path, monkeypatch):
+    env_path.write_text(f"LAPLACE_OPENROUTER_API_KEY={FULL_KEY}\n")
+    observed = {}
+
+    def _validate(preset, api_key, model):
+        observed.update(provider=preset.name, api_key=api_key, model=model)
+        return 42, SOCIAL_CONTENT_MODEL
+
+    monkeypatch.setattr(llm_setup, "validate_key", _validate)
+    resp = client.post(
+        "/settings",
+        data={"csrf": CSRF_TOKEN, "target": "social_content"},
+    )
+
+    assert resp.status_code == 200
+    assert observed == {
+        "provider": SOCIAL_CONTENT_PROVIDER,
+        "api_key": FULL_KEY,
+        "model": SOCIAL_CONTENT_MODEL,
+    }
+    assert FULL_KEY not in resp.text
+
+
+def test_content_writer_error_never_leaks_existing_key(client, env_path, monkeypatch):
+    env_path.write_text(f"LAPLACE_OPENROUTER_API_KEY={FULL_KEY}\n")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError(f"provider rejected {FULL_KEY}")
+
+    monkeypatch.setattr(llm_setup, "validate_key", _boom)
+    resp = client.post(
+        "/settings",
+        data={"csrf": CSRF_TOKEN, "target": "social_content"},
+    )
+
+    assert resp.status_code == 400
     assert FULL_KEY not in resp.text
     assert "sk-sec..." in resp.text
 
@@ -242,6 +328,6 @@ def test_same_origin_post_with_loopback_origin_ok(client, env_path, monkeypatch)
     resp = client.post(
         "/settings",
         data={"csrf": CSRF_TOKEN, "provider": "ollama"},
-        headers={"Origin": "http://127.0.0.1:8000"},
+        headers={"Origin": "http://127.0.0.1:8010"},
     )
     assert resp.status_code == 200

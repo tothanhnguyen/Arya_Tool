@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Kết nối Instagram · Arya_Tool{% endblock %}
+
+{% block head %}
+  <style>
+    .instagram-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .instagram-card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-1);
+      padding: 18px;
+    }
+    .instagram-card h2 { margin: 0 0 6px; font-size: 17px; }
+    .instagram-card p { margin: 0 0 14px; color: var(--muted); }
+    .instagram-form { display: grid; gap: 12px; margin-top: 14px; }
+    .instagram-field { display: grid; gap: 5px; }
+    .instagram-field label { font-size: 12px; font-weight: 700; }
+    .instagram-field input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      padding: 9px 11px;
+      background: var(--paper);
+      color: var(--ink);
+      font: inherit;
+    }
+    .instagram-button {
+      border: 1px solid var(--ink);
+      border-radius: var(--r-pill);
+      padding: 8px 14px;
+      background: var(--ink);
+      color: var(--paper);
+      font: 650 13px var(--sans);
+      justify-self: start;
+    }
+    .instagram-button.secondary { background: var(--paper); color: var(--ink); }
+    .instagram-steps { margin: 0; padding-left: 21px; }
+    .instagram-steps li { margin: 7px 0; }
+    .instagram-status {
+      display: inline-flex;
+      border: 1px solid var(--ink);
+      border-radius: var(--r-pill);
+      padding: 2px 9px;
+      font: 700 11px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .instagram-warning {
+      border-left: 3px solid var(--ink);
+      background: var(--wash);
+      padding: 11px 13px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .instagram-error {
+      border: 1px solid var(--ink);
+      padding: 10px 13px;
+      margin-bottom: 16px;
+      background: var(--paper);
+    }
+    @media (max-width: 720px) {
+      .instagram-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="instagram-connect-title">
+    <div class="page-head">
+      <h1 id="instagram-connect-title">Kết nối Instagram</h1>
+      <span class="count">browser profile cục bộ</span>
+    </div>
+
+    {% include "_social_nav.html" %}
+
+    <div class="instagram-warning" role="note">
+      Arya_Tool không nhận hoặc đọc cookie, access token hay mật khẩu. Bạn tự đăng nhập
+      trên trang chính thức của Instagram trong profile Chrome/Chromium riêng. Flow này
+      không tự đăng bài và không vượt qua 2FA hoặc checkpoint.
+    </div>
+
+    {% if error %}
+      <div class="instagram-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <div class="instagram-grid">
+      <section class="instagram-card" aria-labelledby="instagram-prepare-title">
+        <h2 id="instagram-prepare-title">1. Khai báo tài khoản công khai</h2>
+        <p>Account ID nội bộ được tạo tự động và ràng buộc với đúng user sở hữu.</p>
+        <form class="instagram-form" action="/social/instagram/prepare" method="post">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="user_id" value="{{ user_id }}">
+          <div class="hint">Owner local được Arya_Tool quản lý tự động: #{{ user_id }}</div>
+          <div class="instagram-field">
+            <label for="instagram-display-name">Tên hiển thị</label>
+            <input
+              id="instagram-display-name"
+              name="display_name"
+              required
+              maxlength="200"
+              autocomplete="off"
+            >
+          </div>
+          <div class="instagram-field">
+            <label for="instagram-external-id">Instagram ID công khai</label>
+            <input
+              id="instagram-external-id"
+              name="external_id"
+              required
+              maxlength="255"
+              autocomplete="off"
+              placeholder="@ten_tai_khoan hoặc ID công khai"
+            >
+          </div>
+          <div class="hint">
+            Bước này chỉ tạo profile. Sau khi trang hiện trạng thái
+            <code>prepared</code>, bấm “Mở Instagram để tự đăng nhập”.
+          </div>
+          <button class="instagram-button" type="submit">Chuẩn bị browser profile</button>
+        </form>
+      </section>
+
+      <section class="instagram-card" aria-labelledby="instagram-state-title">
+        <h2 id="instagram-state-title">2. Tự đăng nhập và xác nhận</h2>
+        {% if account and profile %}
+          <p>
+            <strong>{{ account.display_name }}</strong>
+            · {{ account.external_id }}
+            · owner {{ account.user_id }}
+            · <span class="instagram-status">{{ profile.status }}</span>
+          </p>
+          <ol class="instagram-steps">
+            <li>Mở Instagram bằng profile trình duyệt riêng.</li>
+            <li>Tự hoàn tất đăng nhập, 2FA hoặc checkpoint nếu Instagram yêu cầu.</li>
+            <li>Kiểm tra đúng tài khoản rồi quay lại đây để xác nhận.</li>
+          </ol>
+
+          {% if profile.status in ["prepared", "login_pending"] %}
+            <form
+              class="instagram-form"
+              action="/social/instagram/{{ account.id }}/launch"
+              method="post"
+            >
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="user_id" value="{{ account.user_id }}">
+              <button class="instagram-button secondary" type="submit">
+                Mở Instagram để tự đăng nhập
+              </button>
+            </form>
+          {% endif %}
+
+          {% if profile.status == "login_pending" %}
+            <form
+              class="instagram-form"
+              action="/social/instagram/{{ account.id }}/ready"
+              method="post"
+            >
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="user_id" value="{{ account.user_id }}">
+              <button class="instagram-button" type="submit">
+                Tôi đã đăng nhập đúng tài khoản
+              </button>
+            </form>
+          {% elif profile.status == "ready" %}
+            <div class="notice" role="status">
+              Profile đã được xác nhận. Kết nối này không tự động đăng nội dung.
+            </div>
+          {% elif profile.status == "missing" %}
+            <div class="notice" role="status">
+              Profile chưa tồn tại; hãy tạo lại từ bước chuẩn bị.
+            </div>
+          {% endif %}
+        {% else %}
+          <p>Điền metadata công khai để bắt đầu. Form không có trường thông tin đăng nhập.</p>
+        {% endif %}
+      </section>
+    </div>
+  </main>
+{% endblock %}

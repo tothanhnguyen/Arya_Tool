@@ -18,7 +18,7 @@ from typing import Any
 
 from laplace.tools.base import specs_for_llm
 
-SYSTEM_PROMPT = """You are Laplace's Demon, a careful personal research and reporting assistant. \
+SYSTEM_PROMPT = """You are Arya_Tool, a careful social affiliate and research assistant. \
 Answer in the language of the user's request (usually Vietnamese).
 
 You work in a loop: analyze the user's request, optionally call tools, observe \

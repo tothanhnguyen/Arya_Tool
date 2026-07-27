@@ -37,7 +37,7 @@ Mở `.env` và điền theo nhu cầu — **tất cả đều có thể để t
 
 Một lệnh khởi động cả 3 thành phần:
 
-- **Web** (API + trace viewer): http://localhost:8000/
+- **Web** (API + trace viewer): http://localhost:8010/
 - **Telegram bot** (chỉ khi có token): polling tự động
 - **Scheduler**: nạp các job định kỳ từ database
 
@@ -70,7 +70,7 @@ Giới hạn: tin nhắn vào tối đa 2000 ký tự; trả lời dài được
 
 ## 5. Trace viewer
 
-Mở http://localhost:8000/ :
+Mở http://localhost:8010/ :
 
 - **Trang danh sách**: 50 task gần nhất — trạng thái, chiến lược, tổng chi phí, thời gian chạy.
 - **Trang chi tiết** (`/tasks/{id}`): timeline từng bước (tool, tham số, observation, độ trễ, retry) + bảng mọi lệnh gọi LLM (mục đích, model, token, cost) + tổng kết. Tự refresh 5 giây khi task đang chạy.
@@ -89,11 +89,11 @@ Mở http://localhost:8000/ :
 Ví dụ:
 
 ```bash
-curl -X POST localhost:8000/api/tasks \
+curl -X POST localhost:8010/api/tasks \
   -H 'content-type: application/json' \
   -d '{"request": "Tìm hiểu về ReAct pattern", "strategy": "plan_execute"}'
 
-curl localhost:8000/api/tasks/1/trace | python3 -m json.tool
+curl localhost:8010/api/tasks/1/trace | python3 -m json.tool
 ```
 
 Khi đặt `LAPLACE_API_KEY`, thêm header `-H 'X-API-Key: <key>'` vào mọi request (kể cả khi mở trace viewer — trình duyệt sẽ không truy cập được nếu thiếu; dùng extension đặt header hoặc chỉ đặt key khi deploy).
@@ -154,7 +154,7 @@ Bộ đánh giá chạy **37 case** cố định (12 file YAML trong `evals/case
 | Triệu chứng | Nguyên nhân | Cách xử lý |
 |---|---|---|
 | `TelegramConflictError: terminated by other getUpdates` lặp lại | Token đang bị một tiến trình khác polling (app cũ, máy khác) | Tắt tiến trình kia, hoặc `/revoke` token trong @BotFather rồi dùng token mới |
-| `address already in use` cổng 8000 | Còn instance cũ chạy | `lsof -nP -iTCP:8000 -sTCP:LISTEN` → kill PID đó |
+| `address already in use` cổng 8010 | Còn instance cũ chạy | `lsof -nP -iTCP:8010 -sTCP:LISTEN` → kill PID đó |
 | Bot không trả lời | App chưa chạy / token sai / bot bị conflict | Xem log; `curl https://api.telegram.org/bot<TOKEN>/getMe` kiểm tra token |
 | `database is locked` | Nhiều tiến trình ghi SQLite cùng lúc quá lâu | Đã bật WAL + busy_timeout; nếu vẫn gặp, kiểm tra có chạy 2 app trỏ cùng file DB không |
 | Trả lời luôn có prefix `[mock]` | Đang chạy provider mock | Đặt `LAPLACE_LLM_PROVIDER=openai` hoặc `gemini` + key rồi restart |
@@ -163,7 +163,7 @@ Bộ đánh giá chạy **37 case** cố định (12 file YAML trong `evals/case
 
 ## 11. Vị trí dữ liệu
 
-- `laplace.db` (+ `-wal`, `-shm`): toàn bộ dữ liệu — task, trace, ghi chú, todo, job. Xóa các file này = reset sạch.
+- `arya-tool.db` (+ `-wal`, `-shm`): toàn bộ dữ liệu — task, trace, ghi chú, todo, job và affiliate event. Xóa các file này = reset sạch.
 - `reports/`: file báo cáo markdown do tool `report_builder` tạo, tên dạng `u<user>-t<task>-<tiêu-đề>.md`.
 - `eval_results/`: kết quả các lần chạy eval harness (`results.json`, `report.md`, DB tạm).
 - Tất cả đều nằm trong `.gitignore`.

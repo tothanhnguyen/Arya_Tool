@@ -1,89 +1,315 @@
-# Plan làm việc song song — nhiều terminal Claude Code
+# Arya_Tool - Ke hoach 4 cua so Codex song song
 
-> Mục tiêu: hoàn thành giai đoạn 4 (đánh giá & tối ưu) của `PLAN.md` nhanh hơn bằng 4 terminal chạy song song, mỗi terminal một git worktree riêng để không giẫm chân nhau.
+> Cap nhat: 2026-07-27
+>
+> Muc tieu cua dot nay la hoan thanh cac phan local con thieu trong
+> `PLAN_ARYA_TOOL.md` va `PLAN_SUPABASE.md`, voi moi cua so so huu mot vung file
+> rieng. Khong cho nhieu Codex cung sua truc tiep mot thu muc repository.
 
-## Bước 0 — Chuẩn bị (terminal chính, làm TRƯỚC, ~5 phút)
+## Phan cong hien tai
 
-Main đã sạch (commit `45238c0`, 48 test pass, 37 case mock 37/37) — chỉ cần tạo worktree:
+| Cua so | Task | Trang thai |
+|---|---|---|
+| 1 | Dashboard write forms | SAN SANG - chua co nguoi nhan |
+| 2 | Telegram notification va daily summary | SAN SANG - chua co nguoi nhan |
+| 3 | Supabase readiness va artifact storage | SAN SANG - chua co nguoi nhan |
+| 4 | Affiliate import va analytics | XONG - `/root`, 2026-07-28 |
+
+Ket qua cua so 4:
+
+- CSV importer atomic, idempotent va owner-scoped; ho tro `job:<id>`,
+  `post:<id>` va publish-job idempotency key trong `sub_id`.
+- `/stats` tach analytics service, loc theo owner va co top
+  content/product/account/local-hour; EPC khong co click hien `—`, khong hien 0.
+- 9 test cua task pass; `ruff check .` va `git diff --check` pass.
+- Full suite: 398 pass, 1 test cu `test_daily_limit_defers_without_calling_publisher`
+  fail khi chay luc 00:xx Asia/Ho_Chi_Minh vi fixture "1 gio truoc" roi vao
+  ngay hom qua. Day la flaky test ngoai vung file cua cua so 4.
+
+## 0. Trang thai xuat phat
+
+- Branch hien tai: `arya-main`.
+- Snapshot local hien co 392 test pass va `ruff check .` pass.
+- Social MVP, Content Studio, Facebook/Instagram browser profile va Supabase
+  scaffold dang la thay doi chua commit.
+- `.venv/bin/pytest` co shebang cu tu `Laplace_Affiliate`; tam thoi chay
+  `.venv/bin/python3.14 -m pytest`, hoac tao lai venv trong tung worktree.
+
+Vi thay doi chua commit khong xuat hien trong worktree moi, terminal chinh phai
+review va tao mot commit checkpoint truoc khi chia viec. Khong stash roi cho
+bon cua so lam tu commit cu.
 
 ```bash
-cd ~/Documents/Laplace_Demon
+cd /Users/thanhnguyen/Documents/Arya_Tool
 
-# Tạo 4 worktree (thư mục nằm cạnh repo chính)
-git worktree add ../laplace-evals   -b feat/eval-cases-60
-git worktree add ../laplace-exp     -b feat/experiment-2x2
-git worktree add ../laplace-harden  -b feat/hardening
-git worktree add ../laplace-docs    -b chore/deploy-docs
+.venv/bin/python3.14 -m pytest -q
+.venv/bin/ruff check .
+git status --short
+git diff --check
 
-# .venv KHÔNG đi theo worktree — mỗi worktree cần venv riêng để chạy pytest/eval:
-for d in ../laplace-evals ../laplace-exp ../laplace-harden; do
-  (cd $d && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]")
-done
-# laplace-docs không chạy python, bỏ qua cũng được
+# Review ky danh sach file truoc khi commit; .env phai tiep tuc bi ignore.
+git add -A
+git commit -m "feat: checkpoint Arya social and Supabase foundation"
 ```
 
-Sau đó mở 4 cửa terminal, mỗi cửa `cd` vào một thư mục trên và chạy `claude`.
+## 1. Tao 4 worktree
 
-## Phân công 4 terminal
+Chay sau khi checkpoint da duoc commit:
 
-### Terminal 1 — `../laplace-evals` — Mở rộng bộ eval 37 → ~60 case ⭐ dùng nhiều agent — ✅ XONG (66 case, đã merge main `35323a2`, worktree đã dọn)
+```bash
+cd /Users/thanhnguyen/Documents/Arya_Tool
 
-Hiện đã có 37 case trong 12 file (file 07–12 vừa thêm ở commit `45238c0`). Mỗi file YAML chứa nhiều case; các agent viết file mới song song không đụng nhau.
+git worktree add ../Arya_Tool-web       -b feat/arya-web-forms arya-main
+git worktree add ../Arya_Tool-telegram  -b feat/arya-telegram-notify arya-main
+git worktree add ../Arya_Tool-supabase  -b feat/arya-supabase-readiness arya-main
+git worktree add ../Arya_Tool-analytics -b feat/arya-affiliate-analytics arya-main
+```
 
-**Quy ước:** terminal này CHỈ thêm file YAML mới, KHÔNG sửa `laplace/evals/harness.py` và KHÔNG sửa `tests/` (test hiện có dùng `assert len(cases) >= 12` nên thêm case không làm vỡ test — kiểm chứng bằng cách chạy mock eval là đủ).
+Trong moi worktree:
 
-Prompt gợi ý dán vào Claude:
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
+```
 
-> Đọc `laplace/evals/harness.py` và các case mẫu trong `evals/cases/` để hiểu format. Hiện có 37 case trong file 01–12. Spawn 6 agent song song, mỗi agent viết 1 file YAML mới chứa 3–5 case cho một nhóm còn mỏng: (1) direct/clarify, (2) scheduler/cron, (3) multi-step dài (4+ bước), (4) confirm-flow từ chối/đổi ý, (5) prompt injection biến thể mới, (6) tool error/recovery. Đánh số file từ 13 trở đi, không trùng tên. Xong thì chạy eval với provider mock để chắc mọi case parse được và pass, rồi commit. KHÔNG sửa file nào ngoài `evals/cases/`.
+Khong copy `.env` sang cac worktree. Tat ca test cua dot nay phai chay bang
+mock/fake. Credential Supabase hoac Meta chi duoc dung o terminal chinh khi
+nguoi dung chu dong cau hinh.
 
-### Terminal 2 — `../laplace-exp` — Thí nghiệm 2×2 + báo cáo metric
+## 2. Cua so 1 - Dashboard write forms
 
-Chạy ma trận {ReAct, Plan-Execute} × {2 model}, ≥3 run/cấu hình, xuất bảng metric + biểu đồ vào `evals/results/`. Job này chạy lâu (rate limit Gemini) → để riêng một terminal là đúng bài.
+Thu muc: `../Arya_Tool-web`
 
-**Sở hữu file:** `laplace/evals/harness.py`, `laplace/evals/__main__.py`, `evals/results/`, `tests/test_eval_harness.py` (test này import harness — ai sửa harness thì sửa test), `laplace/config.py` (nếu cần thêm cấu hình model thứ 2).
+Muc tieu:
 
-Prompt gợi ý:
+- Hoan thanh Phase 4 local dashboard: tao mock account, upload media, tao
+  affiliate product/draft, approve, schedule va cancel ngay tren web.
+- Tat ca POST form co CSRF, owner isolation, validate MIME/size/input va hien
+  thong bao loi an toan.
+- Giu Content Studio va hai trang connect hien tai hoat dong.
+- Khong hardcode secret va khong dua `auth_ref` vao HTML.
 
-> Viết runner thí nghiệm 2×2: chiến lược {react, plan_execute} × model (Gemini + mock hoặc model thứ 2 nếu có key), mỗi cấu hình ≥3 run trên toàn bộ case trong `evals/cases/`. Lưu kết quả thô JSON + bảng tổng hợp 8 metric (success rate, tool accuracy, số bước, latency, cost, recovery...) vào `evals/results/`, sinh biểu đồ so sánh. Chịu được rate limit (retry/backoff, resume được giữa chừng). Chạy thử trước với mock, commit, rồi chạy thật với Gemini.
+So huu file:
 
-Phụ thuộc: chạy được ngay với 13 case hiện có; sau khi merge Terminal 1 thì chạy lại trên 40 case để lấy số liệu cuối.
+- `laplace/web/social/views.py`
+- `laplace/web/social/templates/social_accounts.html`
+- `laplace/web/social/templates/social_content.html`
+- `laplace/web/social/templates/social_calendar.html`
+- `laplace/web/social/templates/social_jobs.html`
+- File helper moi trong `laplace/web/social/` neu can
+- `tests/test_social_forms.py` va test web moi cua luong nay
 
-### Terminal 3 — `../laplace-harden` — Hardening + tối ưu prompt
+Khong sua:
 
-**Sở hữu file:** `laplace/agent/prompts.py`, `laplace/tools/*`, `laplace/agent/orchestrator.py`, `tests/*` TRỪ `tests/test_eval_harness.py` (thuộc Terminal 2).
+- `laplace/web/app.py`, `laplace/config.py`, `laplace/db.py`
+- `laplace/bot/`, `laplace/migrations/`, `laplace/social/storage.py`
+- `laplace/web/statsview.py`, `laplace/web/templates/stats.html`
+- Cac file connect Facebook/Instagram
 
-Prompt gợi ý:
+Prompt dan vao Codex:
 
-> Hardening theo T16 của PLAN.md: (1) rà soát chống prompt injection trong nội dung fetch từ web (delimiter + system prompt), viết test; (2) error taxonomy + retry/backoff cho tool executor, test lỗi mạng/timeout; (3) rate limit theo user; (4) tối ưu tool description + prompt trong `laplace/agent/prompts.py` cho rõ ràng hơn. Có thể spawn agent song song cho từng mục vì khác file. Chạy đủ `pytest` trước khi commit.
+> Doc `PLAN_ARYA_TOOL.md` Phase 4 va code trong `laplace/web/social/`. Hoan
+> thanh cac write form local tu account/media/product/draft den
+> approve/schedule/cancel. Chi sua vung file duoc giao trong
+> `PLAN_SONG_SONG.md`. Tai su dung service/API hien co, giu owner isolation,
+> CSRF va validation upload; khong them raw secret/auth_ref vao HTML. Viet test
+> cho happy path, CSRF sai, cross-owner, MIME sai va transition sai. Chay test
+> lien quan, sau do full pytest + ruff, commit tren branch hien tai. Khong merge.
 
-### Terminal 4 — `../laplace-docs` — Deploy + tài liệu
+Gate:
 
-**Sở hữu file:** `Dockerfile`, `docker-compose.yml`, `README.md`, `docs/*`.
+- Mot nguoi dung co the hoan thanh vertical flow bang browser voi
+  `MockPublisher`.
+- CSRF va owner isolation co negative test.
 
-Prompt gợi ý:
+## 3. Cua so 2 - Telegram notification va daily summary
 
-> Theo T17 của PLAN.md: kiểm tra và hoàn thiện Dockerfile + docker-compose (build được từ máy sạch, healthcheck, volume cho SQLite), viết README cài đặt từng bước, cập nhật `docs/HUONG_DAN.md` và `docs/KIEN_TRUC.md` cho khớp code hiện tại. Dựng khung báo cáo LaTeX theo cấu trúc: vấn đề → kiến trúc → thực nghiệm → kết quả → giới hạn.
+Thu muc: `../Arya_Tool-telegram`
 
-## Bản đồ file — tránh conflict
+Muc tieu:
 
-| Terminal | Được sửa | KHÔNG sửa |
-|---|---|---|
-| 1 evals | `evals/cases/*.yaml` (file mới, số 13+) | mọi thứ khác, kể cả `tests/` |
-| 2 exp | `laplace/evals/*`, `evals/results/`, `tests/test_eval_harness.py`, `laplace/config.py` | `evals/cases/`, `laplace/agent/` |
-| 3 harden | `laplace/agent/`, `laplace/tools/`, `tests/*` (trừ test_eval_harness) | `laplace/evals/`, `laplace/config.py`, docs |
-| 4 docs | `Dockerfile`, `docker-compose.yml`, `README.md`, `docs/` | mọi file `.py` |
+- Hoan thanh phan con lai cua Phase 5.
+- Gui notification cho publish success, terminal failure va checkpoint/auth
+  failure; retry/deferred khong spam.
+- Daily summary theo timezone cau hinh, chi gui cho owner Telegram da link.
+- Bao toan owner-only confirm pause/resume va sau restart khong gui trung.
 
-## Thứ tự merge về main
+So huu file:
 
-1. **Terminal 1** (chỉ thêm file YAML — merge sớm, không conflict)
-2. **Terminal 3** (hardening — merge trước khi chạy số liệu cuối, vì prompt thay đổi ảnh hưởng kết quả eval)
-3. **Terminal 2** merge runner, rồi **chạy lại thí nghiệm trên main** sau khi 1+3 đã vào → số liệu cuối cùng
-4. **Terminal 4** merge lúc nào cũng được
+- `laplace/bot/social_handlers.py`
+- `laplace/bot/runner.py`
+- Module notification moi trong `laplace/bot/`
+- `laplace/social/scheduler.py`
+- `tests/test_social_telegram.py`
+- Test notification/daily summary moi
 
-Mỗi terminal xong việc: `git commit` trên branch của mình, quay về terminal chính `git merge <branch>` theo thứ tự trên, chạy `pytest` sau mỗi lần merge. Dọn worktree khi xong: `git worktree remove ../laplace-<tên>`.
+Khong sua:
 
-## Lưu ý
+- `laplace/web/`, `laplace/config.py`, `laplace/db.py`
+- `laplace/social/models.py`, `laplace/social/storage.py`
+- `laplace/migrations/`, `supabase/`
 
-- File `.env` không được commit — copy tay sang worktree nào cần chạy LLM thật: `cp .env ../laplace-exp/`.
-- `laplace.db` là DB local, mỗi worktree tự tạo riêng khi chạy — không đụng nhau.
-- Terminal nào rảnh trước: mở **bảng task chung** `/Users/thanhnguyen/Documents/Laplace_Demon/TASKS.md` (đường dẫn tuyệt đối, file nằm ngoài git — chỉ có một bản duy nhất ở repo chính) và nhận task `TODO` theo luật ghi trong đó.
+Prompt dan vao Codex:
+
+> Doc `PLAN_ARYA_TOOL.md` Phase 5 va cac test Telegram/social hien co. Them
+> notification publish success/failure/checkpoint va daily summary, dung
+> dependency injection de test khong can Telegram that. Khong spam cho
+> retry/deferred, chi owner da link moi nhan, va restart khong gui trung trong
+> cung chu ky. Chi sua vung file duoc giao trong `PLAN_SONG_SONG.md`. Viet test
+> fake bot/clock cho timezone, duplicate suppression va owner isolation. Chay
+> test lien quan, full pytest + ruff, commit tren branch hien tai. Khong merge.
+
+Gate:
+
+- Tat ca message tu dong duoc test bang fake bot va fake clock.
+- Khong can token Telegram de test.
+
+## 4. Cua so 3 - Supabase readiness va artifact storage
+
+Thu muc: `../Arya_Tool-supabase`
+
+Muc tieu:
+
+- Hoan thanh phan local con thieu cua S4/S5: abstraction cho
+  `arya-artifacts`, private upload/download/signed URL va idempotent object key.
+- Mo rong ETL/reconciliation cho artifact metadata neu schema hien tai can.
+- Them schema/revision health check va integration-test profile cho Postgres;
+  offline CI dung fake HTTP/DB, remote test phai opt-in.
+- Viet checklist/script an toan cho dry-run, cutover va rollback; khong tu link,
+  push hay reset Supabase remote.
+
+So huu file:
+
+- `laplace/migrations/`
+- Module artifact/Supabase moi trong `laplace/services/`
+- `supabase/migrations/` (chi them migration timestamp moi, khong sua file da co)
+- `supabase/seed.sql` neu chi dung fake data
+- `laplace/config.py`, `laplace/db.py`
+- `tests/test_sqlite_to_supabase.py`, `tests/test_supabase_db.py`
+- Test artifact storage moi
+
+Khong sua:
+
+- `laplace/web/`, `laplace/bot/`
+- `laplace/social/models.py`, `laplace/social/worker.py`
+- `laplace/web/statsview.py`, cac social template
+
+Prompt dan vao Codex:
+
+> Doc `PLAN_SUPABASE.md`, uu tien S4 artifacts, S5 ETL/reconciliation va
+> readiness gates. Chi sua vung file duoc giao trong `PLAN_SONG_SONG.md`.
+> Implement artifact storage private voi object key deterministic, signed URL
+> ngan han va compensation/idempotency; them schema health va Postgres
+> integration profile opt-in. Tat ca default test phai offline bang fake
+> HTTP/DB. Khong doc `.env`, khong login/link/push/reset Supabase remote, khong
+> in URL/password/key. Chay test lien quan, full pytest + ruff, commit tren
+> branch hien tai. Khong merge.
+
+Gate:
+
+- Unit test offline pass, remote integration bi skip neu chua co bien opt-in.
+- Khong co lenh thay doi remote va khong co secret trong diff/log.
+
+## 5. Cua so 4 - Affiliate import va analytics
+
+Thu muc: `../Arya_Tool-analytics`
+
+Muc tieu:
+
+- Hoan thanh phan offline cua Phase 6: import CSV affiliate theo batch, map
+  `sub_id` ve post/job va chay lai khong trung event.
+- Metrics: commission/post, click, EPC khi co denominator, top
+  product/account/time; khong bien missing click thanh 0 EPC.
+- Noi ket qua that vao `/stats`, co empty state va filter owner/timezone.
+- Khong goi Meta API va khong publish that trong dot nay.
+
+So huu file:
+
+- Module moi `laplace/social/affiliate_import.py`
+- Module moi `laplace/social/analytics.py`
+- `laplace/web/statsview.py`
+- `laplace/web/templates/stats.html`
+- Test import/analytics/stats cua luong nay
+- Tai lieu format CSV moi trong `docs/` neu can
+
+Khong sua:
+
+- `laplace/web/social/`, `laplace/bot/`
+- `laplace/config.py`, `laplace/db.py`, `laplace/social/models.py`
+- `laplace/migrations/`, `supabase/`
+- Publisher factory/worker
+
+Prompt dan vao Codex:
+
+> Doc `PLAN_ARYA_TOOL.md` Phase 6 va models affiliate hien co. Implement CSV
+> import theo batch voi validation, `sub_id` mapping va idempotency; them
+> analytics commission/post, click, EPC va top breakdown, sau do render tren
+> `/stats`. Chi sua vung file duoc giao trong `PLAN_SONG_SONG.md`. Bao toan
+> owner isolation, currency/timezone, missing denominator va empty state. Test
+> malformed CSV, duplicate import, cross-owner va metric edge cases. Khong goi
+> Meta API/publish that. Chay test lien quan, full pytest + ruff, commit tren
+> branch hien tai. Khong merge.
+
+Gate:
+
+- Import cung file hai lan khong nhan doi event.
+- Analytics co test doi soat tong va EPC.
+
+## 6. Luat phoi hop
+
+1. Moi cua so chi sua vung file duoc giao. Neu can sua file ngoai vung, dung
+   lai va ghi de xuat trong commit message/bao cao, khong tu sua.
+2. Khong sua `PLAN_ARYA_TOOL.md` de tu danh dau xong; terminal tich hop cap nhat
+   plan sau khi verify.
+3. Khong commit `.env`, database, media, browser profile, report chua redact
+   hoac Supabase temp state.
+4. Moi branch ket thuc bang:
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check .
+git diff --check
+git status --short
+git commit
+```
+
+5. Cua so nao xong thi gui commit hash, danh sach test va cac viec co y de lai.
+
+## 7. Thu tu merge
+
+Tai terminal chinh:
+
+```bash
+cd /Users/thanhnguyen/Documents/Arya_Tool
+
+git merge --no-ff feat/arya-supabase-readiness
+git merge --no-ff feat/arya-affiliate-analytics
+git merge --no-ff feat/arya-telegram-notify
+git merge --no-ff feat/arya-web-forms
+
+.venv/bin/python3.14 -m pytest -q
+.venv/bin/ruff check .
+git diff --check
+```
+
+Sau moi merge, chay test lien quan cua branch do. Neu full suite vo sau merge,
+fix tren branch `arya-main` bang mot commit integration rieng; khong quay lai
+sua lich su branch.
+
+Sau khi toan bo gate pass:
+
+- Cap nhat trang thai Phase 4/5/6 va S4/S5 trong hai plan.
+- Chay smoke flow browser + MockPublisher tren `arya-main`.
+- Moi sang dot 2: Supabase Auth dashboard session/RLS integration va Meta Graph
+  adapter that. Hai viec nay can credential/quyet dinh tich hop va khong nen
+  sua song song voi bon luong tren.
+
+Don worktree chi sau khi da merge va verify:
+
+```bash
+git worktree remove ../Arya_Tool-web
+git worktree remove ../Arya_Tool-telegram
+git worktree remove ../Arya_Tool-supabase
+git worktree remove ../Arya_Tool-analytics
+```

@@ -173,15 +173,31 @@ def clear_registry() -> None:
 
 
 _BUILTIN_MODULES = [
-    "fetch_page", "note_store", "report_builder", "scheduler_tool", "task_list", "web_search",
+    "fetch_page",
+    "note_store",
+    "report_builder",
+    "scheduler_tool",
+    "social_account",
+    "social_content",
+    "social_schedule",
+    "task_list",
+    "web_search",
 ]
 _BUILTIN_NAMES = {
-    "fetch_page", "note_store", "report_builder", "scheduler", "task_list", "web_search",
+    "fetch_page",
+    "note_store",
+    "report_builder",
+    "scheduler",
+    "social_account",
+    "social_content",
+    "social_schedule",
+    "task_list",
+    "web_search",
 }
 
 
 def load_builtin_tools() -> None:
-    """Dang ky 6 tool built-in vao registry.
+    """Dang ky cac tool built-in vao registry.
 
     Decorator chi chay luc import module lan dau; neu registry da bi clear
     (vi du trong test) thi reload module de dang ky lai.

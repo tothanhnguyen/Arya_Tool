@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Calendar · Social Affiliate{% endblock %}
+{% block head %}{% include "_social_styles.html" %}{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="social-page-title">
+    <div class="page-head">
+      <h1 id="social-page-title">Publishing calendar</h1>
+      <span class="count">{{ jobs | length }} upcoming</span>
+    </div>
+    {% include "_social_nav.html" %}
+
+    {% if jobs %}
+      <div class="table-card">
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Các bài social sắp được đăng</caption>
+            <thead>
+              <tr>
+                <th scope="col">Scheduled for</th>
+                <th scope="col">Content</th>
+                <th scope="col">Account</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for job in jobs %}
+                <tr>
+                  <td class="nowrap">{{ job.scheduled_at.strftime("%d/%m/%Y %H:%M") }}</td>
+                  <td class="primary">{{ job.post_title }}</td>
+                  <td>
+                    {{ job.account_name }}
+                    <span class="sub">{{ job.platform }}</span>
+                  </td>
+                  <td><span class="status-text">{{ job.status }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty" role="status">
+        Chưa có bài nào trong lịch đăng.
+        <div class="hint">Các job queued hoặc retry sẽ được sắp theo thời gian tại đây.</div>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

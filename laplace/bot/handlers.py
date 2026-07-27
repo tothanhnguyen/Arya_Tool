@@ -38,12 +38,12 @@ RATE_WINDOW_S = 60.0
 rate_limiter = RateLimiter(max_requests=RATE_MAX_REQUESTS, window_s=RATE_WINDOW_S)
 
 START_TEXT = (
-    "Xin chào, tôi là Laplace's Demon — trợ lý nghiên cứu & báo cáo cá nhân.\n\n"
+    "Xin chào, tôi là Arya_Tool — copilot social affiliate chạy local.\n\n"
     "Tôi có thể:\n"
-    "• Tìm kiếm và tổng hợp thông tin từ nhiều nguồn\n"
-    "• Lưu ghi chú, quản lý việc cần làm\n"
-    "• Viết báo cáo ngắn từ nhiều trang web\n"
-    "• Chạy tác vụ định kỳ (ví dụ: tổng hợp tin mỗi sáng)\n\n"
+    "• Theo dõi tài khoản, nội dung và hàng đợi đăng bài\n"
+    "• Tạo draft, duyệt và lên lịch qua agent có bước xác nhận\n"
+    "• Báo trạng thái publish và dừng/tiếp tục từng tài khoản\n"
+    "• Vẫn hỗ trợ nghiên cứu, ghi chú và báo cáo\n\n"
     "Cứ nhắn yêu cầu bằng ngôn ngữ tự nhiên. Gõ /help để xem thêm."
 )
 
@@ -53,7 +53,12 @@ HELP_TEXT = (
     "• Hành động ghi/xóa (lưu ghi chú, xóa task, tạo lịch) sẽ hỏi xác nhận "
     "bằng nút ✅/❌ trước khi thực thi\n"
     "• /start — giới thiệu\n"
-    "• /help — trợ giúp này\n\n"
+    "• /help — trợ giúp này\n"
+    "• /accounts — danh sách tài khoản social\n"
+    "• /today — lịch đăng hôm nay\n"
+    "• /queue — hàng đợi publish\n"
+    "• /pause <id> / /resume <id> — đổi trạng thái sau khi xác nhận\n"
+    "• /report — tổng kết trạng thái publish\n\n"
     f"Lưu ý: tin nhắn tối đa {MAX_INPUT_CHARS} ký tự; "
     "mỗi người tối đa vài yêu cầu mỗi phút để bot phục vụ được mọi người."
 )

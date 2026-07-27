@@ -1,4 +1,19 @@
-# Laplace's Demon
+# Arya_Tool
+
+**Arya_Tool** là công cụ local-first kế thừa agent core của
+Laplace's Demon để quản lý nội dung, lịch đăng và báo cáo affiliate. Agent đóng
+vai trò copilot: tạo bản nháp, đề xuất lịch và giải thích số liệu; mọi hành động
+đăng bài vẫn đi qua nội dung đã duyệt, publish job xác định và lớp publisher có
+chống đăng trùng.
+
+> Trạng thái hiện tại: MVP local với MockPublisher đã chạy được từ upload media
+> → draft → approve → schedule → worker. Adapter Meta thật vẫn đang khóa
+> fail-closed. Không dùng bản này để tự động rải bình luận, tạo tương tác hoặc
+> đơn hàng giả.
+
+📋 **Kế hoạch triển khai:** [PLAN_ARYA_TOOL.md](PLAN_ARYA_TOOL.md)
+
+## Nền tảng kế thừa
 
 **Laplace's Demon** là một AI Agent cá nhân giao tiếp qua Telegram, thực hiện trọn vẹn vòng lặp *nhận yêu cầu → phân tích → lập kế hoạch → gọi công cụ → quan sát → điều chỉnh → trả lời*. Tên dự án là một **ẩn dụ** lấy từ thí nghiệm tư duy của Pierre-Simon Laplace về một thực thể biết toàn bộ trạng thái hiện tại và từ đó suy ra hành động tiếp theo — ở đây tượng trưng cho khả năng **quan sát trạng thái, lập kế hoạch và thực thi dựa trên thông tin hiện có** của agent, chứ không phải tuyên bố hệ thống "biết mọi thứ". Trọng tâm của dự án là độ tin cậy, khả năng quan sát (full execution trace) và đánh giá định lượng, thay vì chỉ là lớp vỏ gọi API LLM. Stack: Python + FastAPI + aiogram + SQLite, LLM hỗ trợ **8 hãng qua preset registry** (Gemini, OpenAI, Groq, OpenRouter, DeepSeek, xAI, Mistral, Ollama local — kèm mock provider chạy offline).
 
@@ -19,7 +34,7 @@ Telegram ⇄ aiogram Bot ⇄ FastAPI Backend
                      └──┬────────────┬──┘
                         │            │
                  ┌──────▼────┐  ┌────▼────────┐
-                 │ LLM Layer  │  │Tool Executor │→ Tool Registry (6 tools)
+                 │ LLM Layer  │  │Tool Executor │→ Tool Registry (9 tools)
                  │ (adapters) │  └────┬────────┘
                  └───────────┘        │
                               ┌───────▼────────┐
@@ -66,7 +81,7 @@ PLAN.md                  # Kế hoạch chi tiết của đồ án
 ### 1. Cài đặt local (venv + pip)
 
 ```bash
-git clone <repo-url> && cd Laplace_Demon
+git clone <repo-url> && cd Arya_Tool
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"        # cài package + pytest/ruff
@@ -85,9 +100,56 @@ Mặc định `LAPLACE_LLM_PROVIDER=mock` — **chạy được ngay, không c�
 | Bot Telegram thật | `LAPLACE_TELEGRAM_BOT_TOKEN` — chat với [@BotFather](https://t.me/BotFather), gõ `/newbot`, đặt tên → nhận token dạng `123456:ABC-...` |
 | LLM Gemini (free tier) | `LAPLACE_LLM_PROVIDER=gemini` + `LAPLACE_GEMINI_API_KEY` — tạo key tại [Google AI Studio](https://aistudio.google.com/apikey) |
 | LLM OpenAI | `LAPLACE_LLM_PROVIDER=openai` + `LAPLACE_OPENAI_API_KEY` |
+| Copywriter Content Studio | `LAPLACE_OPENROUTER_API_KEY` + `LAPLACE_SOCIAL_CONTENT_PROVIDER=openrouter` + `LAPLACE_SOCIAL_CONTENT_MODEL=openrouter/free` |
 | Tìm kiếm web thật | `LAPLACE_SEARCH_API_KEY` (Tavily) — trống thì tool `web_search` trả kết quả stub |
 
 Chi tiết đầy đủ các biến: [docs/HUONG_DAN.md §2](docs/HUONG_DAN.md).
+
+### Chuẩn bị Supabase (chưa cần key để chạy local)
+
+Repository đã có sẵn:
+
+- schema 17 bảng tại `supabase/migrations/`;
+- RLS theo owner và hai bucket private `arya-media`, `arya-artifacts`;
+- kết nối SQLAlchemy/psycopg có SSL, pool và startup check;
+- Storage adapter `local/supabase`;
+- ETL SQLite → Postgres/Storage, mặc định chỉ dry-run;
+- SQLite vẫn là mặc định cho đến khi bạn tự điền thông tin Supabase.
+
+Sau khi tạo project, điền các biến sau vào `.env` trên máy của bạn. Không gửi
+secret key qua chat và không commit `.env`:
+
+```env
+LAPLACE_DB_URL=postgresql://...
+LAPLACE_SUPABASE_URL=https://<project-ref>.supabase.co
+LAPLACE_SUPABASE_SECRET_KEY=
+LAPLACE_SOCIAL_MEDIA_BACKEND=supabase
+```
+
+Link project và dựng schema:
+
+```bash
+npx --yes supabase@latest login
+npx --yes supabase@latest link --project-ref <project-ref>
+npx --yes supabase@latest db push --dry-run
+npx --yes supabase@latest db push
+```
+
+Kiểm kê SQLite trước khi ghi lên Supabase:
+
+```bash
+python -m laplace.migrations.sqlite_to_supabase \
+  --source sqlite:///./arya-tool.db \
+  --dry-run \
+  --report reports/supabase-dry-run.json
+```
+
+Lệnh sinh cả báo cáo JSON và Markdown, không in URL/password hay nội dung row.
+Sau khi backup SQLite và thư mục `media/`, chạy thật bằng cách đổi `--dry-run`
+thành `--execute`. ETL giữ nguyên ID, ghi theo batch/foreign key, kiểm từng ID,
+reset identity sequence và dùng SHA-256 để media chạy lại không bị nhân đôi.
+
+Chi tiết cutover/rollback: [PLAN_SUPABASE.md](PLAN_SUPABASE.md).
 
 ### Nối API key hãng AI
 
@@ -127,12 +189,73 @@ Thiếu key thì thông báo lỗi luôn kèm URL trang lấy key của đúng h
 python -m laplace
 ```
 
-Một lệnh khởi động cả web (API + trace viewer, http://localhost:8000/), Telegram bot (nếu có token) và scheduler. Mở Telegram, tìm bot của bạn, gõ `/start` rồi nhắn yêu cầu tự nhiên ("Lưu ghi chú: deadline 30/8", "So sánh FastAPI và Flask, viết báo cáo ngắn"...). Dừng bằng `Ctrl+C` (graceful shutdown).
+Một lệnh khởi động cả web (API + trace viewer, http://localhost:8010/), Telegram bot (nếu có token) và scheduler. Mở Telegram, tìm bot của bạn, gõ `/start` rồi nhắn yêu cầu tự nhiên ("Lưu ghi chú: deadline 30/8", "So sánh FastAPI và Flask, viết báo cáo ngắn"...). Dừng bằng `Ctrl+C` (graceful shutdown).
+
+Các màn hình social local:
+
+- Dashboard: `http://127.0.0.1:8010/social/`
+- Kết nối Facebook: `http://127.0.0.1:8010/social/facebook/connect`
+- Kết nối Instagram: `http://127.0.0.1:8010/social/instagram/connect`
+- Affiliate Analytics: `http://127.0.0.1:8010/stats`
+- API tương tác và upload: `http://127.0.0.1:8010/docs`
+- Telegram: `/accounts`, `/today`, `/queue`, `/pause <id>`,
+  `/resume <id>`, `/report`
+
+Facebook và Instagram dùng browser profile riêng cho từng user/account. Arya_Tool
+chỉ mở trang đăng nhập chính thức để bạn tự đăng nhập; form không nhận cookie,
+mật khẩu hoặc access token, và ứng dụng không đọc/xuất cookie. Trạng thái
+`ready` chỉ được ghi sau khi bạn xác nhận đúng tài khoản. Đây là bước kết nối
+cục bộ; publisher thật vẫn bị khóa.
+
+Mặc định publisher là `mock`, nên worker mô phỏng đăng thành công mà không gọi
+Facebook/TikTok. Tạo account thử bằng `POST /api/social/accounts/mock`, upload
+JPEG/PNG/WebP/MP4, tạo draft, approve và schedule qua nhóm endpoint
+`/api/social/*`. Nếu đặt `LAPLACE_API_KEY`, mọi request phải gửi header
+`X-API-Key`.
+
+## Content Studio — viết content bằng OpenRouter Free
+
+Mở **http://127.0.0.1:8010/social/content** để tạo nội dung affiliate từ dữ
+kiện sản phẩm đã kiểm tra. Copywriter dùng cấu hình riêng, không thay đổi
+`LAPLACE_LLM_PROVIDER` hoặc model của agent:
+
+```env
+LAPLACE_OPENROUTER_API_KEY=sk-or-v1-...
+LAPLACE_SOCIAL_CONTENT_PROVIDER=openrouter
+LAPLACE_SOCIAL_CONTENT_MODEL=openrouter/free
+```
+
+Có thể nhập và validate key tại **http://127.0.0.1:8010/settings**. Settings chỉ
+truy cập từ localhost, gửi key trong POST body và chỉ hiển thị dạng che; không
+đưa raw key vào HTML, prompt, trace hay database.
+
+Content Studio có 6 preset văn phong:
+
+1. **Review thật thà** — ưu, điểm cần cân nhắc và người phù hợp.
+2. **Deal ngắn gọn** — lợi ích, điều kiện/giới hạn và CTA nhanh.
+3. **Kể chuyện tình huống** — kể tình huống giả định, không bịa đã mua/đã dùng.
+4. **So sánh để chọn mua** — so sánh theo tiêu chí và nhóm nhu cầu.
+5. **Hướng dẫn checklist** — checklist ngắn trước khi mua.
+6. **Script video ngắn** — hook 2 giây, ba ý chính, lưu ý và CTA.
+
+Luồng bắt buộc là **generate → validate → approve**:
+
+1. Model chỉ tạo draft từ sản phẩm, media, đối tượng đọc, dữ kiện và preset đã chọn.
+2. Arya_Tool kiểm tra bằng code: schema JSON, độ dài, số hashtag/emoji, URL và
+   các claim bị cấm; draft lỗi được sửa lại tối đa theo cấu hình retry.
+3. Nội dung hợp lệ vẫn ở trạng thái `draft`. Người dùng phải xem và bấm
+   **Duyệt nội dung** trước khi có thể lên lịch hoặc đăng.
+
+`openrouter/free` tự định tuyến qua model miễn phí đang khả dụng, nên phù hợp
+cho MVP và tác vụ content đơn giản nhưng chất lượng, độ trễ và khả năng trả đúng
+JSON có thể dao động. Tài khoản free thường chỉ có khoảng 50 request/ngày và
+rate limit/quota có thể thay đổi; khi cần đầu ra ổn định nên ghim một model cụ
+thể hoặc chuyển sang gói trả phí.
 
 ### 4. Chạy test & eval
 
 ```bash
-pytest                     # 48 test, offline, không cần key
+pytest                     # toàn bộ test offline, không cần key
 python -m laplace.evals    # eval harness: 37 case qua agent loop thật (mock, offline)
 
 # Số liệu thật (cần key) — lặp 3 lần/case, có thể thêm LLM-as-judge:
@@ -148,11 +271,11 @@ cp .env.example .env       # tùy chọn — không có .env vẫn chạy đư�
 docker compose up --build
 ```
 
-- SQLite nằm trong volume `./data/` (`/app/data/laplace.db` trong container), báo cáo markdown trong `./reports/` — dữ liệu giữ nguyên qua các lần restart.
+- SQLite nằm trong volume `./data/` (`/app/data/arya-tool.db` trong container), báo cáo markdown trong `./reports/` — dữ liệu giữ nguyên qua các lần restart.
 - Container có **healthcheck** (gọi `/openapi.json` mỗi 30s) — `docker compose ps` hiện `healthy` sau ~20 giây.
-- Trace viewer: http://localhost:8000/ như khi chạy local.
+- Trace viewer: http://localhost:8010/ như khi chạy local.
 
-## Bộ tool (6 tool MVP)
+## Bộ tool (9 tool MVP)
 
 | Tool | Chức năng | Ghi/Đọc | Cần confirm |
 |---|---|---|---|
@@ -162,20 +285,27 @@ docker compose up --build
 | `task_list` | CRUD việc cần làm | Ghi | Có (delete hàng loạt) |
 | `report_builder` | Ghép các observation thành báo cáo markdown | Ghi file | Không |
 | `scheduler` | Tạo/xóa job định kỳ | Ghi | Có |
+| `social_account` | Xem, pause/resume tài khoản social | Ghi | Pause/resume |
+| `social_content` | List, tạo draft, approve/delete nội dung | Ghi | Approve/delete |
+| `social_schedule` | List, tạo/hủy publish job | Ghi | Tạo/hủy |
 
-## Trace viewer
+## Affiliate Analytics
 
-Mọi task đều được ghi trace đầy đủ (từng bước, prompt/response, tokens, cost, latency). Xem tại **http://localhost:8000/** sau khi khởi động (local hoặc Docker).
+Trang **http://localhost:8010/stats** tổng hợp lượt xem, lượt bấm, CTR,
+hoa hồng, EPC và tỷ lệ chuyển đổi. Dữ liệu được ghi nhận qua
+`POST /api/social/events`; trang Eval nội bộ không còn hiển thị trong menu.
 
 ## Giới hạn hiện tại & roadmap
 
 Giới hạn của MVP:
 
-- Chưa có multi-agent, vector memory / RAG, plugin marketplace.
-- Chỉ hỗ trợ kênh Telegram (chưa có Slack/Discord/web chat).
+- Chưa có adapter Meta Graph/TikTok thật; chỉ `MockPublisher` được bật.
+- Dashboard hiện thiên về theo dõi; luồng ghi dùng REST API trong `/docs`.
+- Chưa import file đối soát affiliate nên `/report` chưa có doanh thu/hoa hồng.
 - Scheduler chạy in-process (APScheduler), chưa phân tán (Celery/Redis).
 - Chống prompt injection ở mức cơ bản (delimiter + system prompt).
-- SQLite mặc định; PostgreSQL là hướng nâng cấp khi triển khai ổn định.
+- SQLite vẫn là backend local mặc định; adapter/migration Supabase đã chuẩn bị,
+  còn link project, push schema, Auth session và cutover cần credential của bạn.
 
 Roadmap chi tiết theo tuần (kiến trúc, eval harness 2 chiến lược × 2 model, hardening, deploy): xem [PLAN.md](PLAN.md).
 # Laplace-Demon-Beta

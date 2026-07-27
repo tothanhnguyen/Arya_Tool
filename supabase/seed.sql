@@ -1,0 +1,2 @@
+-- Development seed intentionally contains no credentials or production data.
+-- Create test users through Supabase Auth so auth.users and public.users stay linked.

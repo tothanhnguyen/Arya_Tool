@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs · Social Affiliate{% endblock %}
+{% block head %}{% include "_social_styles.html" %}{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="social-page-title">
+    <div class="page-head">
+      <h1 id="social-page-title">Publish jobs</h1>
+      <span class="count">
+        {{ jobs | length }}{% if status_filter %} · status={{ status_filter }}{% endif %}
+      </span>
+    </div>
+    {% include "_social_nav.html" %}
+
+    {% if jobs %}
+      <div class="table-card">
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Lịch sử tác vụ đăng bài social</caption>
+            <thead>
+              <tr>
+                <th scope="col">Job</th>
+                <th scope="col">Content</th>
+                <th scope="col">Account</th>
+                <th scope="col">Scheduled for</th>
+                <th scope="col" class="num">Attempts</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for job in jobs %}
+                <tr>
+                  <td class="num">#{{ job.id }}</td>
+                  <td class="primary">{{ job.post_title }}</td>
+                  <td>
+                    {{ job.account_name }}
+                    <span class="sub">{{ job.platform }}</span>
+                  </td>
+                  <td class="nowrap">{{ job.scheduled_at.strftime("%d/%m/%Y %H:%M") }}</td>
+                  <td class="num">{{ job.attempt_count }}</td>
+                  <td><span class="status-text">{{ job.status }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty" role="status">
+        {% if status_filter %}
+          Không có publish job với trạng thái “{{ status_filter }}”.
+        {% else %}
+          Chưa có publish job nào.
+        {% endif %}
+        <div class="hint">Lịch sử chạy sẽ xuất hiện sau khi nội dung được lên lịch.</div>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

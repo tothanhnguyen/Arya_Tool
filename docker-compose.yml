@@ -1,5 +1,5 @@
 services:
-  laplace:
+  arya_tool:
     build: .
     # .env khong bat buoc: thieu thi app chay provider mock (khong can key nao).
     # Cu phap dai (required: false) can Docker Compose >= 2.24.
@@ -7,11 +7,14 @@ services:
       - path: .env
         required: false
     environment:
-      # SQLite nam trong volume ./data de giu du lieu qua cac lan restart
-      LAPLACE_DB_URL: sqlite:////app/data/laplace.db
+      # Dung URL trong .env neu da cutover Supabase; neu khong thi fallback SQLite.
+      LAPLACE_DB_URL: ${LAPLACE_DB_URL:-sqlite:////app/data/arya-tool.db}
+      # Container can nghe tren interface noi bo; host van chi expose port khai bao.
+      LAPLACE_WEB_HOST: 0.0.0.0
+      LAPLACE_WEB_PORT: 8010
     ports:
-      - "8000:8000"
+      - "8010:8010"
     volumes:
-      - ./data:/app/data # laplace.db (+ -wal/-shm)
+      - ./data:/app/data # arya-tool.db (+ -wal/-shm)
       - ./reports:/app/reports # bao cao markdown do tool report_builder tao
     restart: unless-stopped

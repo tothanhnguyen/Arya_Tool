@@ -5,6 +5,7 @@ import logging
 from aiogram import Bot, Dispatcher
 
 from laplace.bot.handlers import router
+from laplace.bot.social_handlers import router as social_router
 from laplace.config import get_settings
 from laplace.db import init_db
 from laplace.tools.base import load_builtin_tools
@@ -27,6 +28,7 @@ async def run_bot() -> None:
 
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
+    dp.include_router(social_router)
     dp.include_router(router)
 
     logger.info("Telegram bot bat dau polling...")

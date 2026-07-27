@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings — Laplace's Demon{% endblock %}
+{% block title %}Settings — Arya_Tool{% endblock %}
 {% block head %}
 <style>
   /* Form controls: cung token voi base (mono, line, paper) — khong che style moi */
@@ -15,6 +15,11 @@
   .notice.err { border-style: dashed; border-color: var(--ink-2); color: var(--ink-2); }
   form.settings-form button[type=submit] { margin-top: 14px; }
   td form { margin: 0; display: inline-flex; }
+  .copywriter-config { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 18px; }
+  .copywriter-values { display: grid; gap: 8px; align-content: start; }
+  .copywriter-values > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  .free-warning { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--line); color: var(--muted); font-size: 12px; line-height: 1.55; }
+  @media (max-width: 720px) { .copywriter-config { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 {% block content %}
@@ -29,8 +34,14 @@
 
 {% if success %}
 <div class="notice">
-  Key sống! Model <code>{{ success.model }}</code> trả lời sau {{ success.latency_ms }} ms.
-  Đã ghi .env: LAPLACE_LLM_PROVIDER={{ success.provider }}{% if success.masked_key %} · key {{ success.masked_key }}{% endif %}{% if success.override_model %} · LAPLACE_LLM_MODEL={{ success.override_model }}{% endif %}
+  {% if success.target == "social_content" %}
+    Copywriter sẵn sàng! <code>{{ success.model }}</code> trả lời sau {{ success.latency_ms }} ms.
+    Đã ghi .env: LAPLACE_SOCIAL_CONTENT_PROVIDER=openrouter ·
+    LAPLACE_SOCIAL_CONTENT_MODEL=openrouter/free{% if success.masked_key %} · key {{ success.masked_key }}{% endif %}
+  {% else %}
+    Key sống! Model <code>{{ success.model }}</code> trả lời sau {{ success.latency_ms }} ms.
+    Đã ghi .env: LAPLACE_LLM_PROVIDER={{ success.provider }}{% if success.masked_key %} · key {{ success.masked_key }}{% endif %}{% if success.override_model %} · LAPLACE_LLM_MODEL={{ success.override_model }}{% endif %}
+  {% endif %}
   (backup .env.bak, chmod 600).
 </div>
 {% endif %}
@@ -38,6 +49,58 @@
 <div class="notice">
   Lưu ý: cấu hình mới trong .env chỉ áp dụng sau khi <strong>restart</strong> process
   (<code>python -m laplace</code>) — trang này không hot-reload config đang chạy.
+</div>
+
+<h2>Copywriter cho Content Studio</h2>
+<div class="card">
+  <div class="card-body copywriter-config">
+    <div>
+      <p>
+        Copywriter dùng cấu hình riêng, không đổi model của agent chính. Preset
+        miễn phí được cố định ở OpenRouter Free Router.
+      </p>
+      <div class="copywriter-values">
+        <div>
+          <span>Provider</span>
+          <code>LAPLACE_SOCIAL_CONTENT_PROVIDER={{ content_writer.provider }}</code>
+        </div>
+        <div>
+          <span>Model</span>
+          <code>LAPLACE_SOCIAL_CONTENT_MODEL={{ content_writer.model }}</code>
+        </div>
+        <div>
+          <span>OpenRouter key</span>
+          {% if content_writer.has_key %}
+            <span class="badge">{{ content_writer.masked_key }}</span>
+          {% else %}
+            <span style="color:var(--faint)">(chưa đặt)</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="free-warning">
+        <strong>Giới hạn bản miễn phí:</strong> tài khoản free thường chỉ có khoảng
+        50 request/ngày và có rate limit; quota có thể thay đổi. <code>openrouter/free</code>
+        tự chọn model miễn phí đang còn khả dụng nên chất lượng, độ trễ và khả năng
+        trả đúng JSON có thể dao động. Arya_Tool sẽ validate draft, nhưng vẫn cần
+        người dùng duyệt trước khi lên lịch hoặc đăng.
+      </div>
+    </div>
+    <form class="settings-form" method="post" action="/settings" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="target" value="social_content">
+      <div class="field">
+        <label for="content_api_key">OpenRouter API key</label>
+        <input type="password" id="content_api_key" name="api_key"
+               placeholder="{% if content_writer.has_key %}để trống để kiểm tra key hiện có{% else %}dán key vào đây{% endif %}"
+               autocomplete="new-password">
+        <div class="hint">
+          Key chỉ được gửi bằng POST và lưu vào .env với chmod 600; trang không
+          render key đầy đủ.
+        </div>
+      </div>
+      <button type="submit" class="btn-ghost">Validate &amp; dùng OpenRouter Free</button>
+    </form>
+  </div>
 </div>
 
 <h2>Trạng thái hiện tại</h2>
@@ -100,6 +163,7 @@
   <div class="card-body">
     <form class="settings-form" method="post" action="/settings" autocomplete="off">
       <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="target" value="agent">
       <div class="field">
         <label for="provider">Hãng AI</label>
         <select id="provider" name="provider">

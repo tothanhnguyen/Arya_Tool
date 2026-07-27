@@ -103,7 +103,7 @@ def test_trace_viewer_pages(session):
 
         home = client.get("/")
         assert home.status_code == 200
-        assert "Laplace" in home.text
+        assert "Arya_Tool" in home.text
 
         detail = client.get(f"/tasks/{task_id}")
         assert detail.status_code == 200

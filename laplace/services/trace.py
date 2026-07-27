@@ -1,6 +1,6 @@
 """Ghi va doc execution trace: steps + llm_calls cua moi task."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -83,7 +83,7 @@ def replay_events(session: Session, task_id: int) -> dict[str, Any]:
         events.append(
             (
                 # LLM call duoc ghi truoc step cung thoi diem -> uu tien 0
-                (c.created_at or datetime.min, 0, c.id),
+                (c.created_at or datetime.min.replace(tzinfo=UTC), 0, c.id),
                 {
                     "kind": "llm_call",
                     "title": f"LLM · {c.purpose}",
@@ -102,7 +102,7 @@ def replay_events(session: Session, task_id: int) -> dict[str, Any]:
     for s in steps:
         events.append(
             (
-                (s.created_at or datetime.min, 1, s.id),
+                (s.created_at or datetime.min.replace(tzinfo=UTC), 1, s.id),
                 {
                     "kind": "step",
                     "title": f"Step {s.idx} · {s.tool}",

@@ -4,7 +4,7 @@ Du lieu trace mau duoc tao truc tiep qua ORM voi timestamp kiem soat duoc,
 khong can goi mang/LLM — dung nhu kich ban demo offline.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -12,7 +12,7 @@ from laplace.models import LLMCall, Step, Task, User
 from laplace.services.trace import replay_events
 from laplace.web.app import create_app
 
-T0 = datetime(2026, 1, 1, 12, 0, 0)
+T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _seed_trace(session) -> int:

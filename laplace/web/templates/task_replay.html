@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Replay task #{{ task.id }} — Laplace's Demon{% endblock %}
+{% block title %}Replay task #{{ task.id }} — Arya_Tool{% endblock %}
 {% block head %}
 {% if auto and next_delay_s is not none %}
 <meta http-equiv="refresh" content="{{ next_delay_s }};url=/tasks/{{ task.id }}/replay?upto={{ upto + 1 }}&auto=1&speed={{ speed }}#cursor">

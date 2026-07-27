@@ -1,203 +1,348 @@
 {% extends "base.html" %}
-{% block title %}Stats — Laplace's Demon{% endblock %}
+{% block title %}Affiliate Analytics — Arya_Tool{% endblock %}
 
 {% block head %}
 <style>
-  /* ---------- Style rieng trang /stats ---------- */
-  .charts { max-width: 760px; }
-  .chart-card {
-    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
-    box-shadow: var(--shadow-1); padding: 14px 16px 12px; margin-bottom: 16px;
+  .analytics-intro {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 22px;
   }
-  .chart-card h3 {
-    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
-    letter-spacing: .1em; color: var(--muted); font-weight: 650;
+  .analytics-note {
+    color: var(--muted); font-size: 12px; font-family: var(--mono);
   }
-  .chart-legend {
-    display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center;
-    font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 0 0 8px;
+  .metric-hint {
+    color: var(--faint); font-size: 10.5px; font-family: var(--mono);
+    margin-top: 3px;
   }
-  .chart-legend .sw {
-    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
-    margin-right: 5px; vertical-align: -1px; border: 1px solid var(--line);
+  .analytics-grid {
+    display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+    gap: 16px; align-items: start; margin-top: 18px;
   }
-  .chart-legend .sw.hatch {
-    background: repeating-linear-gradient(45deg, #55554f 0 2px, #ffffff 2px 4px);
+  .analytics-card {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--r-md); box-shadow: var(--shadow-1); overflow: hidden;
   }
-  svg.chart { display: block; width: 100%; height: auto; }
-  svg.chart text {
-    font-family: var(--mono); font-size: 10.5px; fill: var(--muted);
+  .analytics-card-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line);
+  }
+  .analytics-card-head h2 {
+    margin: 0; color: var(--ink); font-size: 13px;
+    text-transform: none; letter-spacing: 0;
+  }
+  .analytics-card-head h2::after { display: none; }
+  .analytics-card-head span {
+    color: var(--muted); font-size: 11px; font-family: var(--mono);
+  }
+  .bar-list { padding: 8px 16px 14px; }
+  .bar-row {
+    display: grid; grid-template-columns: 92px minmax(0, 1fr) 70px;
+    gap: 10px; align-items: center; padding: 8px 0;
+  }
+  .bar-label { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .bar-track {
+    height: 8px; border-radius: var(--r-pill); background: var(--wash);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; min-width: 0; border-radius: var(--r-pill); background: var(--ink);
+  }
+  .bar-fill.click { background: var(--muted); }
+  .bar-fill.commission {
+    background: repeating-linear-gradient(
+      135deg, var(--ink) 0 4px, var(--paper) 4px 6px
+    );
+    border: 1px solid var(--ink);
+  }
+  .bar-value {
+    text-align: right; font-size: 11px; font-family: var(--mono);
     font-variant-numeric: tabular-nums;
   }
-  svg.chart text.dlabel { font-size: 11px; fill: var(--ink); font-weight: 600; }
-  svg.chart line.grid { stroke: var(--line); stroke-width: 1; }
-  svg.chart line.axis { stroke: var(--faint); stroke-width: 1; }
-  .chart-card details.blk { margin-top: 4px; }
-  .chart-card details.blk table { font-size: 12.5px; margin-top: 8px; }
-  .chart-card details.blk th, .chart-card details.blk td { padding: 6px 10px; }
+  .day-block { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .day-block:last-child { border-bottom: 0; }
+  .day-title {
+    display: flex; justify-content: space-between; gap: 12px;
+    font-weight: 650; font-size: 12px; margin-bottom: 2px;
+  }
+  .day-title span:last-child {
+    color: var(--muted); font-family: var(--mono); font-weight: 400;
+  }
+  .commission-list { padding: 4px 16px 12px; }
+  .commission-list .bar-row { grid-template-columns: 92px minmax(0, 1fr) 105px; }
+  .daily-table { margin-top: 16px; }
+  .daily-table .table-scroll { max-height: 430px; }
+  .breakdown-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px; margin-top: 16px;
+  }
+  .breakdown-grid .table-scroll { max-height: 360px; }
+  .breakdown-grid table { min-width: 430px; }
+  .muted-dash { color: var(--faint); }
+  @media (max-width: 780px) {
+    .analytics-grid { grid-template-columns: 1fr; }
+    .breakdown-grid { grid-template-columns: 1fr; }
+    .bar-row { grid-template-columns: 78px minmax(0, 1fr) 64px; }
+    .commission-list .bar-row {
+      grid-template-columns: 78px minmax(0, 1fr) 98px;
+    }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <h1>Thống kê</h1>
-  <span class="count">14 ngày gần nhất có dữ liệu</span>
+<div class="analytics-intro">
+  <div class="page-head" style="margin:0;">
+    <h1>Affiliate Analytics</h1>
+    <span class="count">traffic → click → commission</span>
+  </div>
+  <div class="analytics-note">
+    Owner #{{ owner_user_id or "—" }} · {{ timezone }} · {{ currency }}
+  </div>
 </div>
 
-{% if empty %}
-<div class="empty">
-  Chưa có dữ liệu thống kê.
-  <div class="hint">Chạy vài task rồi quay lại đây</div>
-</div>
-{% else %}
-
-<div class="totals" style="margin-top:0; margin-bottom:22px;">
-  {% for t in kpis %}
-  <div class="tile"><div class="k">{{ t.k }}</div><div class="v">{{ t.v }}</div></div>
+<div class="totals" style="margin-top:0;">
+  {% for metric in kpis %}
+  <article class="tile">
+    <div class="k">{{ metric.k }}</div>
+    <div class="v">{{ metric.v }}</div>
+    <div class="metric-hint">{{ metric.hint }}</div>
+  </article>
   {% endfor %}
 </div>
 
-<div class="charts">
-
-  {# ---------------- Token theo ngay ---------------- #}
-  <div class="chart-card">
-    <h3>Token theo ngày</h3>
-    {% set c = token_chart %}
-    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột: token theo ngày">
-      {% for g in c.grid %}
-      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
-      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
-      {% endfor %}
-      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
-      {% for b in c.bars %}
-      <path d="{{ b.path }}" fill="#0b0b0b"><title>{{ b.title }}</title></path>
-      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
-      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
-      {% endfor %}
-    </svg>
-    <details class="blk">
-      <summary>Bảng dữ liệu</summary>
-      <table><thead><tr><th>Ngày</th><th class="num">Token</th></tr></thead><tbody>
-        {% for day, v in token_table %}<tr><td>{{ day }}</td><td class="num">{{ v }}</td></tr>{% endfor %}
-      </tbody></table>
-    </details>
+{% if empty %}
+<div class="empty" style="margin-top:18px;">
+  Chưa có dữ liệu traffic hoặc hoa hồng.
+  <div class="hint">
+    Ghi nhận qua API /api/social/events hoặc import CSV bằng
+    python -m laplace.social.affiliate_import
   </div>
-
-  {# ---------------- Cost theo ngay (chart RIENG, mot truc y) ---------------- #}
-  <div class="chart-card">
-    <h3>Cost theo ngày (USD)</h3>
-    {% set c = cost_chart %}
-    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột: chi phí USD theo ngày">
-      {% for g in c.grid %}
-      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
-      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
-      {% endfor %}
-      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
-      {% for b in c.bars %}
-      <path d="{{ b.path }}" fill="#55554f"><title>{{ b.title }}</title></path>
-      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
-      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
-      {% endfor %}
-    </svg>
-    <details class="blk">
-      <summary>Bảng dữ liệu</summary>
-      <table><thead><tr><th>Ngày</th><th class="num">Cost (USD)</th></tr></thead><tbody>
-        {% for day, v in cost_table %}<tr><td>{{ day }}</td><td class="num">{{ v }}</td></tr>{% endfor %}
-      </tbody></table>
-    </details>
-  </div>
-
-  {# ---------------- Task theo ngay: stacked done/failed/khac ---------------- #}
-  <div class="chart-card">
-    <h3>Task theo ngày</h3>
-    <div class="chart-legend">
-      <span><span class="sw" style="background:#0b0b0b"></span>done</span>
-      <span><span class="sw hatch"></span>failed (gạch chéo)</span>
-      <span><span class="sw" style="background:#8a8a85"></span>khác</span>
-    </div>
-    {% set c = task_chart %}
-    <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Biểu đồ cột chồng: task done, failed, khác theo ngày">
-      <defs>
-        <pattern id="hatch-failed" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <rect width="6" height="6" fill="#55554f"/>
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/>
-        </pattern>
-      </defs>
-      {% for g in c.grid %}
-      <line class="grid" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
-      <text x="{{ c.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end">{{ g.label }}</text>
-      {% endfor %}
-      <line class="axis" x1="{{ c.pad_l }}" x2="{{ c.w - c.pad_r }}" y1="{{ c.baseline }}" y2="{{ c.baseline }}"/>
-      {% for b in c.bars %}
-      {% for s in b.segments %}
-      {% if s.shape == "path" %}
-      <path d="{{ s.d }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></path>
-      {% else %}
-      <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.bw }}" height="{{ s.bh }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></rect>
-      {% endif %}
-      {% endfor %}
-      {% if b.label %}<text class="dlabel" x="{{ b.cx }}" y="{{ b.ly }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
-      {% if b.x_label %}<text x="{{ b.cx }}" y="{{ c.x_label_y }}" text-anchor="middle">{{ b.x_label }}</text>{% endif %}
-      {% endfor %}
-    </svg>
-    <details class="blk">
-      <summary>Bảng dữ liệu</summary>
-      <table>
-        <thead><tr><th>Ngày</th><th class="num">Done</th><th class="num">Failed</th><th class="num">Khác</th><th class="num">Tổng</th></tr></thead>
-        <tbody>
-          {% for day, done, failed, other, total in task_table %}
-          <tr><td>{{ day }}</td><td class="num">{{ done }}</td><td class="num">{{ failed }}</td><td class="num">{{ other }}</td><td class="num">{{ total }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </details>
-  </div>
-
-  {# ---------------- Top tools ---------------- #}
-  <div class="chart-card">
-    <h3>Top tools</h3>
-    {% if tools_chart.bars %}
-    <div class="chart-legend">
-      <span><span class="sw" style="background:#0b0b0b"></span>gọi ok</span>
-      <span><span class="sw hatch"></span>lỗi (gạch chéo)</span>
-    </div>
-    <svg class="chart" viewBox="0 0 {{ tools_chart.w }} {{ tools_chart.h }}" role="img" aria-label="Biểu đồ cột ngang: số lần gọi từng tool">
-      <defs>
-        <pattern id="hatch-err" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <rect width="6" height="6" fill="#55554f"/>
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/>
-        </pattern>
-      </defs>
-      {% for b in tools_chart.bars %}
-      <text x="144" y="{{ b.name_y }}" text-anchor="end">{{ b.name }}</text>
-      {% for s in b.segments %}
-      {% if s.shape == "path" %}
-      <path d="{{ s.d }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></path>
-      {% else %}
-      <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.bw }}" height="{{ s.bh }}" fill="{{ s.fill }}"><title>{{ s.title }}</title></rect>
-      {% endif %}
-      {% endfor %}
-      <text x="{{ b.vx }}" y="{{ b.name_y }}">{{ b.value }}</text>
-      {% endfor %}
-    </svg>
-    {% else %}
-    <div class="empty" style="padding:24px 16px;">Chưa có step nào gọi tool.</div>
-    {% endif %}
-    <details class="blk">
-      <summary>Bảng dữ liệu</summary>
-      <table>
-        <thead><tr><th>Tool</th><th class="num">Số lần gọi</th><th class="num">Lỗi</th></tr></thead>
-        <tbody>
-          {% for tool, calls, errors in tools_table %}
-          <tr><td class="tool-name">{{ tool }}</td><td class="num">{{ calls }}</td><td class="num">{{ errors }}</td></tr>
-          {% else %}
-          <tr><td colspan="3" style="color:var(--faint)">Trống</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </details>
-  </div>
-
 </div>
+{% else %}
+
+<div class="analytics-grid">
+  <section class="analytics-card" aria-labelledby="traffic-title">
+    <div class="analytics-card-head">
+      <h2 id="traffic-title">Traffic theo ngày</h2>
+      <span>view / click</span>
+    </div>
+    <div class="bar-list">
+      {% for row in daily_rows %}
+      <div class="day-block">
+        <div class="day-title">
+          <span>{{ row.day }}</span>
+          <span>CTR {{ "%.1f"|format(row.ctr) }}%</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Lượt xem</div>
+          <div class="bar-track" role="img" aria-label="{{ row.day }}: {{ row.views }} lượt xem">
+            <div class="bar-fill" style="width:{{ row.view_width }}%"></div>
+          </div>
+          <div class="bar-value">{{ row.views }}</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Lượt bấm</div>
+          <div class="bar-track" role="img" aria-label="{{ row.day }}: {{ row.clicks }} lượt bấm">
+            <div class="bar-fill click" style="width:{{ row.click_width }}%"></div>
+          </div>
+          <div class="bar-value">{{ row.clicks }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="analytics-card" aria-labelledby="commission-title">
+    <div class="analytics-card-head">
+      <h2 id="commission-title">Hoa hồng theo ngày</h2>
+      <span>EPC = hoa hồng / click</span>
+    </div>
+    <div class="commission-list">
+      {% for row in daily_rows %}
+      <div class="day-block">
+        <div class="day-title">
+          <span>{{ row.day }}</span>
+          <span>{{ row.commission_count }} lượt</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Hoa hồng</div>
+          <div class="bar-track" role="img"
+               aria-label="{{ row.day }}: {{ row.commission_display }} hoa hồng">
+            <div class="bar-fill commission" style="width:{{ row.commission_width }}%"></div>
+          </div>
+          <div class="bar-value">{{ row.commission_display }}</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">EPC</div>
+          <div></div>
+          <div class="bar-value">{{ row.epc_display }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<section class="daily-table" aria-labelledby="content-performance-title">
+  <h2 id="content-performance-title">Hiệu quả theo nội dung</h2>
+  <div class="table-card">
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Nội dung</th>
+            <th class="num">Lượt xem</th>
+            <th class="num">Lượt bấm</th>
+            <th class="num">CTR</th>
+            <th class="num">Lượt hoa hồng</th>
+            <th class="num">Hoa hồng</th>
+            <th class="num">EPC</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in content_rows %}
+          <tr>
+            <td class="primary">{{ row.label }}</td>
+            <td class="num">{{ row.views }}</td>
+            <td class="num">{{ row.clicks }}</td>
+            <td class="num">{{ "%.1f"|format(row.ctr) }}%</td>
+            <td class="num">{{ row.commission_count }}</td>
+            <td class="num">{{ row.commission_display }}</td>
+            <td class="num">{{ row.epc_display }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="muted-dash">Chưa có event gắn với nội dung.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="breakdown-grid">
+  <section aria-labelledby="product-performance-title">
+    <h2 id="product-performance-title">Top sản phẩm</h2>
+    <div class="table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Sản phẩm</th>
+              <th class="num">Click</th>
+              <th class="num">Hoa hồng</th>
+              <th class="num">EPC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in product_rows %}
+            <tr>
+              <td class="primary">{{ row.label }}</td>
+              <td class="num">{{ row.clicks }}</td>
+              <td class="num">{{ row.commission_display }}</td>
+              <td class="num">{{ row.epc_display }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted-dash">Chưa có dữ liệu sản phẩm.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="account-performance-title">
+    <h2 id="account-performance-title">Top tài khoản</h2>
+    <div class="table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Tài khoản</th>
+              <th class="num">Click</th>
+              <th class="num">Hoa hồng</th>
+              <th class="num">EPC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in account_rows %}
+            <tr>
+              <td class="primary">{{ row.label }}</td>
+              <td class="num">{{ row.clicks }}</td>
+              <td class="num">{{ row.commission_display }}</td>
+              <td class="num">{{ row.epc_display }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted-dash">Chưa có dữ liệu tài khoản.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="time-performance-title">
+    <h2 id="time-performance-title">Top khung giờ</h2>
+    <div class="table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Giờ địa phương</th>
+              <th class="num">Click</th>
+              <th class="num">Hoa hồng</th>
+              <th class="num">EPC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in time_rows %}
+            <tr>
+              <td class="primary">{{ row.label }}</td>
+              <td class="num">{{ row.clicks }}</td>
+              <td class="num">{{ row.commission_display }}</td>
+              <td class="num">{{ row.epc_display }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted-dash">Chưa có dữ liệu theo giờ.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<details class="blk" style="margin-top:16px;">
+  <summary>Dữ liệu theo ngày</summary>
+  <div class="table-card" style="margin-top:8px;">
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Ngày</th>
+            <th class="num">View</th>
+            <th class="num">Click</th>
+            <th class="num">CTR</th>
+            <th class="num">Lượt hoa hồng</th>
+            <th class="num">Hoa hồng</th>
+            <th class="num">EPC</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in daily_rows %}
+          <tr>
+            <td>{{ row.day }}</td>
+            <td class="num">{{ row.views }}</td>
+            <td class="num">{{ row.clicks }}</td>
+            <td class="num">{{ "%.1f"|format(row.ctr) }}%</td>
+            <td class="num">{{ row.commission_count }}</td>
+            <td class="num">{{ row.commission_display }}</td>
+            <td class="num">{{ row.epc_display }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
 {% endif %}
 {% endblock %}

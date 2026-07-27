@@ -11,6 +11,11 @@ venv/
 
 # Env & secrets
 .env
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+supabase/.env.*
+supabase/signing_keys.json
 
 # Database
 *.db
@@ -22,6 +27,9 @@ data/
 # Output
 reports/
 eval_results/
+media/
+imports/
+backups/
 
 # Tooling caches
 .pytest_cache/

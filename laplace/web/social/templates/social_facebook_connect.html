@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Kết nối Facebook · Arya_Tool{% endblock %}
+{% block head %}
+  {% include "_social_styles.html" %}
+  <style>
+    .connect-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .connect-card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-1);
+      padding: 18px;
+    }
+    .connect-card h2 { margin: 0 0 6px; font-size: 17px; }
+    .connect-card p { margin: 0 0 14px; color: var(--muted); }
+    .connect-form { display: grid; gap: 12px; }
+    .connect-field { display: grid; gap: 5px; }
+    .connect-field label { font-size: 12px; font-weight: 700; }
+    .connect-field input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      padding: 9px 11px;
+      background: var(--paper);
+      color: var(--ink);
+      font: inherit;
+    }
+    .connect-button {
+      border: 1px solid var(--ink);
+      border-radius: var(--r-pill);
+      padding: 8px 14px;
+      background: var(--ink);
+      color: var(--paper);
+      font: 650 13px var(--sans);
+      justify-self: start;
+    }
+    .connect-button.secondary { background: var(--paper); color: var(--ink); }
+    .connect-steps { margin: 0; padding-left: 21px; }
+    .connect-steps li { margin: 7px 0; }
+    .connect-status {
+      display: inline-flex;
+      border: 1px solid var(--ink);
+      border-radius: var(--r-pill);
+      padding: 2px 9px;
+      font: 700 11px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .connect-warning {
+      border-left: 3px solid var(--ink);
+      background: var(--wash);
+      padding: 11px 13px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .connect-error {
+      border: 1px solid var(--ink);
+      padding: 10px 13px;
+      margin-bottom: 16px;
+      background: var(--paper);
+    }
+    @media (max-width: 720px) {
+      .connect-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <main aria-labelledby="facebook-connect-title">
+    <div class="page-head">
+      <h1 id="facebook-connect-title">Kết nối Facebook</h1>
+      <span class="count">browser profile cục bộ</span>
+    </div>
+
+    <div class="connect-warning" role="note">
+      Arya_Tool không yêu cầu bạn dán cookie hoặc access token. Trình duyệt riêng sẽ mở để
+      bạn tự đăng nhập trực tiếp trên Facebook. Flow này không đăng bài tự động.
+    </div>
+
+    {% if error %}
+      <div class="connect-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <div class="connect-grid">
+      <section class="connect-card" aria-labelledby="prepare-title">
+        <h2 id="prepare-title">1. Chuẩn bị profile</h2>
+        <p>Mỗi tài khoản dùng một profile trình duyệt riêng và được ràng buộc với user sở hữu.</p>
+        <form class="connect-form" action="/social/facebook/connect/prepare" method="post">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="user_id" value="{{ user_id }}">
+          <div class="hint">Owner local được Arya_Tool quản lý tự động: #{{ user_id }}</div>
+          <div class="connect-field">
+            <label for="facebook-display-name">Tên hiển thị</label>
+            <input
+              id="facebook-display-name"
+              name="display_name"
+              value="{{ display_name }}"
+              required
+              maxlength="200"
+              autocomplete="off"
+            >
+          </div>
+          <div class="connect-field">
+            <label for="facebook-external-id">Facebook external ID công khai</label>
+            <input
+              id="facebook-external-id"
+              name="external_id"
+              value="{{ external_id }}"
+              required
+              maxlength="255"
+              autocomplete="off"
+            >
+          </div>
+          <div class="hint">
+            Bước này chỉ tạo profile. Sau khi trang hiện trạng thái
+            <code>prepared</code>, bấm “Mở Facebook để tự đăng nhập”.
+          </div>
+          <button class="connect-button" type="submit">Chuẩn bị browser profile</button>
+        </form>
+      </section>
+
+      <section class="connect-card" aria-labelledby="state-title">
+        <h2 id="state-title">2. Đăng nhập và xác nhận</h2>
+        {% if profile %}
+          <p>
+            <strong>{{ account.display_name }}</strong>
+            · Social Account #{{ account.social_account_id }}
+            · owner {{ profile.user_id }}
+            · <span class="connect-status">{{ profile.status }}</span>
+          </p>
+          <ol class="connect-steps">
+            <li>Chuẩn bị profile riêng.</li>
+            <li>Mở Facebook và tự hoàn tất đăng nhập trong cửa sổ trình duyệt.</li>
+            <li>Quay lại đây, chỉ xác nhận sẵn sàng sau khi đã kiểm tra đúng tài khoản.</li>
+          </ol>
+
+          {% if profile.status in ["prepared", "login_pending"] %}
+            <form
+              class="connect-form"
+              action="/social/facebook/connect/{{ account.social_account_id }}/launch"
+              method="post"
+            >
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="user_id" value="{{ profile.user_id }}">
+              <button class="connect-button secondary" type="submit">
+                Mở Facebook để tự đăng nhập
+              </button>
+            </form>
+          {% endif %}
+
+          {% if profile.status == "login_pending" %}
+            <form
+              class="connect-form"
+              action="/social/facebook/connect/{{ account.social_account_id }}/ready"
+              method="post"
+            >
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="user_id" value="{{ profile.user_id }}">
+              <button class="connect-button" type="submit">Tôi đã đăng nhập đúng tài khoản</button>
+            </form>
+          {% elif profile.status == "ready" %}
+            <div class="notice" role="status">
+              Browser profile đã sẵn sàng. Việc đăng bài vẫn là một bước riêng và cần được duyệt.
+            </div>
+          {% elif profile.status == "missing" %}
+            <div class="notice" role="status">
+              Profile chưa tồn tại. Hãy dùng bước chuẩn bị ở bên trái.
+            </div>
+          {% endif %}
+        {% else %}
+          <p>Chuẩn bị một profile để bắt đầu. Không có dữ liệu đăng nhập nào đi qua form này.</p>
+        {% endif %}
+      </section>
+    </div>
+  </main>
+{% endblock %}

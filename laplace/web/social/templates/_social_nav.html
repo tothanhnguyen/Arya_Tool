@@ -1,0 +1,11 @@
+<nav class="social-nav" aria-label="Điều hướng Social Affiliate">
+  <a href="/social/"{% if active_social_nav == "overview" %} aria-current="page"{% endif %}>Overview</a>
+  <a href="/social/accounts"{% if active_social_nav == "accounts" %} aria-current="page"{% endif %}>Accounts</a>
+  <a href="/social/facebook/connect">Connect Facebook</a>
+  <a href="/social/instagram/connect">Connect Instagram</a>
+  <a href="/social/content"{% if active_social_nav == "content" %} aria-current="page"{% endif %}>Content</a>
+  <a href="/social/calendar"{% if active_social_nav == "calendar" %} aria-current="page"{% endif %}>Calendar</a>
+  <a href="/social/jobs"{% if active_social_nav == "jobs" %} aria-current="page"{% endif %}>Jobs</a>
+  <a href="/social/affiliate">Affiliate</a>
+  <a href="/social/settings">Settings</a>
+</nav>

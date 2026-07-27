@@ -1,6 +1,6 @@
 """Entrypoint: python -m laplace.
 
-Chay web (uvicorn, port 8000) + scheduler; neu co Telegram token thi chay bot
+Chay web (uvicorn, port 8010) + scheduler; neu co Telegram token thi chay bot
 polling song song trong cung event loop.
 """
 
@@ -77,15 +77,25 @@ async def main() -> None:
         logger.warning("Danh dau %d task mo coi (running/pending) thanh failed", orphans)
 
     from laplace.scheduler import start_scheduler, stop_scheduler
+    from laplace.social.scheduler import (
+        start_social_scheduler,
+        stop_social_scheduler,
+    )
 
     on_result = None
     if settings.telegram_bot_token:
         on_result = _telegram_notifier(settings.telegram_bot_token)
     start_scheduler(on_result=on_result)
+    start_social_scheduler()
 
     app = create_app()
     server = uvicorn.Server(
-        uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+        uvicorn.Config(
+            app,
+            host=settings.web_host,
+            port=settings.web_port,
+            log_level="info",
+        )
     )
     # Khong de uvicorn chiem SIGINT/SIGTERM — neu no chiem, bot polling va
     # scheduler khong duoc dung, process treo phai kill -9.
@@ -127,6 +137,7 @@ async def main() -> None:
         await stop_wait
 
     # Thu tu tat: scheduler -> bot polling -> uvicorn; gioi han ~5 giay
+    stop_social_scheduler()
     stop_scheduler()
     if bot_task is not None and not bot_task.done():
         bot_task.cancel()

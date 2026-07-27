@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Laplace's Demon{% endblock %}</title>
+  <title>{% block title %}Arya_Tool{% endblock %}</title>
   {% block head %}{% endblock %}
   <style>
     /* ---------- Design tokens: monochrome minimalism ---------- */
@@ -239,7 +239,7 @@
 <body>
   <div class="wrap">
     <header class="site">
-      <a class="brand" href="/" aria-label="Laplace's Demon — trang chủ">
+      <a class="brand" href="/" aria-label="Arya_Tool — trang chủ">
         <span class="mark" aria-hidden="true">
           <!-- con mat quan sat: vong tron + dong tu -->
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -248,14 +248,14 @@
           </svg>
         </span>
         <span>
-          <span class="name">Laplace's Demon</span>
-          <span class="tag">execution trace viewer</span>
+          <span class="name">Arya_Tool</span>
+          <span class="tag">local social copilot</span>
         </span>
       </a>
       <span class="spacer"></span>
       <a class="navlink{% if not active_nav or active_nav == 'tasks' %} active{% endif %}" href="/">Tasks</a>
-      <a class="navlink{% if active_nav == 'stats' %} active{% endif %}" href="/stats">Stats</a>
-      <a class="navlink{% if active_nav == 'evals' %} active{% endif %}" href="/evals">Evals</a>
+      <a class="navlink{% if active_nav == 'stats' %} active{% endif %}" href="/stats">Analytics</a>
+      <a class="navlink{% if active_nav == 'social' %} active{% endif %}" href="/social/">Social</a>
       <a class="navlink{% if active_nav == 'settings' %} active{% endif %}" href="/settings">Settings</a>
     </header>
     {% block content %}{% endblock %}
