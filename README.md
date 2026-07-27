@@ -123,8 +123,18 @@ secret key qua chat và không commit `.env`:
 LAPLACE_DB_URL=postgresql://...
 LAPLACE_SUPABASE_URL=https://<project-ref>.supabase.co
 LAPLACE_SUPABASE_SECRET_KEY=
+LAPLACE_SUPABASE_PUBLISHABLE_KEY=
+LAPLACE_SUPABASE_AUTH_ENABLED=true
 LAPLACE_SOCIAL_MEDIA_BACKEND=supabase
 ```
+
+`PUBLISHABLE_KEY` (hoặc legacy `ANON_KEY`) chỉ dùng để kiểm tra Supabase Auth
+session. `SECRET_KEY` chỉ ở server cho Storage; ứng dụng từ chối dùng service
+key làm user-auth key. Khi Auth được bật, dashboard map `auth.users.id` vào
+`public.users.auth_user_id` và fail closed nếu session thiếu, hết hạn hoặc chưa
+được map. Access token có thể gửi bằng Bearer hoặc cookie do login layer đặt
+với `HttpOnly`, `Secure` và `SameSite`; JSON mutation bắt buộc Bearer, còn form
+dashboard dùng CSRF/same-origin gate.
 
 Link project và dựng schema:
 
@@ -272,8 +282,12 @@ docker compose up --build
 ```
 
 - SQLite nằm trong volume `./data/` (`/app/data/arya-tool.db` trong container), báo cáo markdown trong `./reports/` — dữ liệu giữ nguyên qua các lần restart.
-- Container có **healthcheck** (gọi `/openapi.json` mỗi 30s) — `docker compose ps` hiện `healthy` sau ~20 giây.
+- Container có **healthcheck** liveness tại `/health/live`; readiness DB,
+  Storage và scheduler ở `/health/ready`.
 - Trace viewer: http://localhost:8010/ như khi chạy local.
+
+Runbook health, SQLite backup và kế hoạch backup Supabase:
+[docs/OPS_RUNBOOK.md](docs/OPS_RUNBOOK.md).
 
 ### 6. CI/CD
 

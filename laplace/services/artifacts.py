@@ -8,6 +8,7 @@ issuing a download or signed URL.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from collections.abc import Callable
@@ -33,11 +34,15 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from laplace.config import get_settings
 from laplace.db import Base
+from laplace.services.supabase_url import (
+    SupabaseURLValidationError,
+    validate_supabase_origin,
+)
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 _SAFE_KIND_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}")
-_ALLOWED_CONTENT_TYPES = frozenset(
+ALLOWED_ARTIFACT_CONTENT_TYPES = frozenset(
     {
         "application/json",
         "application/octet-stream",
@@ -46,6 +51,13 @@ _ALLOWED_CONTENT_TYPES = frozenset(
         "text/markdown",
     }
 )
+_EXTENSIONS_BY_CONTENT_TYPE = {
+    "application/json": frozenset({".json"}),
+    "application/octet-stream": frozenset({".bin"}),
+    "application/zip": frozenset({".zip"}),
+    "text/csv": frozenset({".csv"}),
+    "text/markdown": frozenset({".md", ".markdown"}),
+}
 _MAX_SIGNED_URL_TTL_SECONDS = 3600
 
 
@@ -67,6 +79,10 @@ class ArtifactValidationError(ArtifactError):
 
 class ArtifactOwnershipError(ArtifactError):
     """The caller does not own the requested artifact."""
+
+
+class ArtifactStateError(ArtifactError):
+    """The artifact cannot be used in its current lifecycle state."""
 
 
 class ArtifactPersistenceError(ArtifactError):
@@ -165,6 +181,7 @@ class ArtifactReconciliation:
 
 class ArtifactStorage(Protocol):
     bucket: str
+    max_bytes: int
 
     def upload(
         self,
@@ -217,18 +234,60 @@ def _validate_kind(kind: str) -> str:
     return normalized
 
 
-def _validate_content(
+def validate_artifact_upload(
     *,
+    original_name: str,
     payload: bytes,
     content_type: str,
     max_bytes: int,
-) -> None:
+    inspect_content: bool = False,
+) -> str:
+    if (
+        not original_name
+        or len(original_name) > 255
+        or "/" in original_name
+        or "\\" in original_name
+        or any(ord(character) < 32 or ord(character) == 127 for character in original_name)
+    ):
+        raise ArtifactValidationError("artifact filename is invalid")
+    safe_name = safe_artifact_filename(original_name)
     if not payload:
         raise ArtifactValidationError("artifact payload is empty")
     if len(payload) > max_bytes:
         raise ArtifactValidationError("artifact payload exceeds the size limit")
-    if content_type not in _ALLOWED_CONTENT_TYPES:
+    if content_type not in ALLOWED_ARTIFACT_CONTENT_TYPES:
         raise ArtifactValidationError("artifact content type is not allowed")
+    suffix = "." + safe_name.rsplit(".", 1)[-1] if "." in safe_name else ""
+    if suffix not in _EXTENSIONS_BY_CONTENT_TYPE[content_type]:
+        raise ArtifactValidationError(
+            "artifact filename extension does not match its content type"
+        )
+    if not inspect_content:
+        return safe_name
+    if content_type in {"text/csv", "text/markdown"}:
+        try:
+            decoded = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ArtifactValidationError(
+                "text artifact must use UTF-8"
+            ) from exc
+        if "\x00" in decoded:
+            raise ArtifactValidationError("text artifact contains invalid bytes")
+    elif content_type == "application/json":
+        try:
+            decoded = payload.decode("utf-8")
+            json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ArtifactValidationError(
+                "JSON artifact content is invalid"
+            ) from exc
+    elif content_type == "application/zip" and not payload.startswith(
+        (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+    ):
+        raise ArtifactValidationError(
+            "ZIP artifact content does not match its content type"
+        )
+    return safe_name
 
 
 class SupabaseArtifactStorage:
@@ -249,7 +308,12 @@ class SupabaseArtifactStorage:
             )
         if max_bytes < 1:
             raise ArtifactConfigurationError("artifact size limit is invalid")
-        self._project_url = project_url.rstrip("/")
+        try:
+            self._project_url = validate_supabase_origin(project_url)
+        except SupabaseURLValidationError as exc:
+            raise ArtifactConfigurationError(
+                "Supabase artifact storage URL is invalid"
+            ) from exc
         self._secret_key = secret_key
         self.bucket = bucket
         self.max_bytes = max_bytes
@@ -301,13 +365,13 @@ class SupabaseArtifactStorage:
         payload: bytes,
         content_type: str,
     ) -> StoredArtifact:
-        _validate_content(
+        safe_name = validate_artifact_upload(
+            original_name=original_name,
             payload=payload,
             content_type=content_type,
             max_bytes=self.max_bytes,
         )
         digest = hashlib.sha256(payload).hexdigest()
-        safe_name = safe_artifact_filename(original_name)
         key = artifact_object_key(user_id, digest, safe_name)
         stored = StoredArtifact(
             user_id=user_id,
@@ -431,8 +495,9 @@ def upload_with_compensation(
     payload: bytes,
     content_type: str,
     persist: Callable[[StoredArtifact], _T],
+    compensate_new_upload: bool = True,
 ) -> _T:
-    """Persist metadata after upload and remove newly created orphan objects."""
+    """Persist metadata and optionally remove a newly created orphan object."""
 
     stored = storage.upload(
         user_id=user_id,
@@ -443,7 +508,7 @@ def upload_with_compensation(
     try:
         return persist(stored)
     except Exception as exc:
-        if stored.created:
+        if stored.created and compensate_new_upload:
             try:
                 storage.delete(stored, user_id=user_id)
             except ArtifactError as compensation_exc:
@@ -469,7 +534,7 @@ def _metadata_from_row(row: Artifact) -> ArtifactMetadata:
 
 
 class ArtifactService:
-    """Own metadata transactions and compensate cross-system partial failures."""
+    """Own private artifact metadata transactions and lifecycle state."""
 
     def __init__(
         self,
@@ -485,6 +550,15 @@ class ArtifactService:
         self.storage = storage
         self.session_factory = session_factory
         self.signed_url_ttl_seconds = signed_url_ttl_seconds
+
+    @property
+    def max_upload_bytes(self) -> int:
+        value = getattr(self.storage, "max_bytes", 50 * 1024 * 1024)
+        if type(value) is not int or value < 1:
+            raise ArtifactConfigurationError(
+                "artifact upload size limit is invalid"
+            )
+        return value
 
     def _find_by_key(
         self,
@@ -512,7 +586,12 @@ class ArtifactService:
         content_type: str,
     ) -> ArtifactMetadata:
         normalized_kind = _validate_kind(kind)
-        safe_name = safe_artifact_filename(original_name)
+        safe_name = validate_artifact_upload(
+            original_name=original_name,
+            payload=payload,
+            content_type=content_type,
+            max_bytes=self.max_upload_bytes,
+        )
 
         def persist(stored: StoredArtifact) -> ArtifactMetadata:
             with self.session_factory() as session:
@@ -576,11 +655,31 @@ class ArtifactService:
             payload=payload,
             content_type=content_type,
             persist=persist,
+            # Immediate deletion can race a concurrent idempotent uploader that
+            # has already verified the object and is about to commit metadata.
+            # Prefer a harmless orphan for later reconciliation over data loss.
+            compensate_new_upload=False,
         )
 
     def download(self, artifact_id: int, *, user_id: int) -> bytes:
         stored = self._active_stored_artifact(artifact_id, user_id=user_id)
         return self.storage.download(stored, user_id=user_id)
+
+    def get_metadata(
+        self,
+        artifact_id: int,
+        *,
+        user_id: int,
+    ) -> ArtifactMetadata:
+        with self.session_factory() as session:
+            artifact = session.get(Artifact, artifact_id)
+            if artifact is None or artifact.user_id != user_id:
+                raise ArtifactOwnershipError(
+                    "artifact is not available to this user"
+                )
+            if artifact.status != "active":
+                raise ArtifactStateError("artifact is not active")
+            return _metadata_from_row(artifact)
 
     def create_signed_url(
         self,
@@ -608,7 +707,7 @@ class ArtifactService:
             if artifact is None or artifact.user_id != user_id:
                 raise ArtifactOwnershipError("artifact is not available to this user")
             if artifact.status != "active":
-                raise ArtifactError("artifact is not active")
+                raise ArtifactStateError("artifact is not active")
             return StoredArtifact(
                 user_id=artifact.user_id,
                 original_name=artifact.original_name,
@@ -700,7 +799,7 @@ class ArtifactService:
                         "artifact is not available to this user"
                     )
                 if artifact.status == "deleted":
-                    raise ArtifactError("artifact is already deleted")
+                    raise ArtifactStateError("artifact is already deleted")
                 artifact.status = "deleting"
                 artifact.last_error = None
                 stored = StoredArtifact(

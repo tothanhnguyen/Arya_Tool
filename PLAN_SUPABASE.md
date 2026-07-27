@@ -10,11 +10,11 @@ Tiến độ ngày 2026-07-27:
 | S0 config/CLI scaffold | Xong local; chưa link remote |
 | S1 schema 18 bảng | Xong migration; chờ `db push` |
 | S2 database adapter | Xong SQLite/Postgres adapter và unit test |
-| S3 Auth/RLS | Xong SQL trigger/policy; `/stats` fail closed, Auth session chưa nối |
-| S4 Storage | Xong local media + private artifact service/RLS; chưa chạy remote |
+| S3 Auth/RLS | Xong local: session validation, owner mapping và RLS SQL; chưa chạy remote |
+| S4 Storage | Xong local media + private Artifact API/service/RLS; chưa chạy remote |
 | S5 ETL | Xong local dry-run/execute/reconciliation media + artifact; chưa chạy remote |
 | S6 cutover/rollback | Xong checklist generator local; chưa diễn tập/cutover remote |
-| S7 vận hành | Chưa triển khai |
+| S7 vận hành | Xong local health/readiness + backup tooling; alert/backup remote chưa bật |
 
 ## 1. Mục tiêu
 
@@ -305,6 +305,12 @@ Gate:
 - Rollback được diễn tập trên staging trước production.
 
 ## 12. Phase S7 — Vận hành
+
+Trạng thái local: đã có `/health/live`, `/health/ready`, probe DB/schema,
+Storage và scheduler; SQLite online backup có manifest/hash/verify; helper
+Supabase chỉ sinh kế hoạch command bất hoạt. Alert, lịch backup, Storage export,
+retention và restore drill trên staging vẫn cần operator cấu hình sau khi link
+project.
 
 - Health check DB/Storage riêng; không trả secret trong lỗi.
 - Alert cho DB unavailable, Storage failure, scheduler lag và job retry tăng.

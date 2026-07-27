@@ -334,7 +334,7 @@ def test_prepare_fails_closed_when_external_id_belongs_to_another_user(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Facebook external ID đã thuộc một user khác."
+    assert response.json()["detail"] == "Facebook account này đã tồn tại."
     assert fake_manager.calls == []
     session.expire_all()
     rows = session.scalars(select(SocialAccount)).all()
