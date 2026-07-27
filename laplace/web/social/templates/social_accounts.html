@@ -1,7 +1,38 @@
 {% extends "base.html" %}
 
 {% block title %}Accounts · Social Affiliate{% endblock %}
-{% block head %}{% include "_social_styles.html" %}{% endblock %}
+{% block head %}
+  {% include "_social_styles.html" %}
+  <style>
+    .write-panel {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px; align-items: end; margin-bottom: 20px; padding: 16px;
+      border: 1px solid var(--line); border-radius: var(--r-md);
+      background: var(--paper); box-shadow: var(--shadow-1);
+    }
+    .write-fields {
+      display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px;
+    }
+    .write-field label {
+      display: block; margin-bottom: 4px; color: var(--muted);
+      font-size: 10.5px; font-weight: 650; letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .write-field input, .write-field select {
+      width: 100%; padding: 8px 10px; color: var(--ink); background: var(--paper);
+      border: 1px solid var(--line); border-radius: var(--r-sm); font: 13px var(--sans);
+    }
+    .connect-links { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
+    .notice.err { border-style: dashed; }
+    @media (max-width: 900px) {
+      .write-panel { grid-template-columns: 1fr; align-items: stretch; }
+      .write-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .write-fields { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
 
 {% block content %}
   <main aria-labelledby="social-page-title">
@@ -11,6 +42,64 @@
     </div>
     {% include "_social_nav.html" %}
 
+    {% if error %}
+      <div class="notice err" role="alert">{{ error }}</div>
+    {% elif notice %}
+      <div class="notice" role="status">{{ notice }}</div>
+    {% endif %}
+
+    <section aria-labelledby="mock-account-title">
+      <h2 id="mock-account-title">Tạo mock account</h2>
+      <form class="write-panel" method="post" action="/social/accounts/mock">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <div class="write-fields">
+          <div class="write-field">
+            <label for="mock-user-id">Workspace user</label>
+            <select id="mock-user-id" name="user_id" required>
+              <option value="">Chọn user</option>
+              {% for user in users %}
+                <option value="{{ user.id }}"
+                  {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                  {{ user.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="write-field">
+            <label for="mock-platform">Platform</label>
+            <select id="mock-platform" name="platform" required>
+              {% for platform in ("facebook", "instagram", "tiktok") %}
+                <option value="{{ platform }}"
+                  {% if form_values.platform == platform %}selected{% endif %}>
+                  {{ platform }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="write-field">
+            <label for="mock-display-name">Tên hiển thị</label>
+            <input id="mock-display-name" name="display_name" required maxlength="200"
+                   value="{{ form_values.display_name or '' }}"
+                   placeholder="Page Demo">
+          </div>
+          <div class="write-field">
+            <label for="mock-external-id">External ID công khai</label>
+            <input id="mock-external-id" name="external_id" required maxlength="255"
+                   value="{{ form_values.external_id or '' }}"
+                   placeholder="page-demo">
+          </div>
+        </div>
+        <button class="btn-ghost" type="submit" {% if not users %}disabled{% endif %}>
+          Tạo mock
+        </button>
+      </form>
+    </section>
+
+    <div class="connect-links" aria-label="Kết nối tài khoản bằng browser profile">
+      <a class="btn-ghost" href="/social/facebook/connect">Kết nối Facebook</a>
+      <a class="btn-ghost" href="/social/instagram/connect">Kết nối Instagram</a>
+    </div>
+
     {% if accounts %}
       <div class="table-card">
         <div class="table-scroll">
@@ -19,6 +108,7 @@
             <thead>
               <tr>
                 <th scope="col">Account</th>
+                <th scope="col">Owner</th>
                 <th scope="col">Platform</th>
                 <th scope="col">Auth mode</th>
                 <th scope="col">Status</th>
@@ -30,6 +120,7 @@
               {% for account in accounts %}
                 <tr>
                   <td class="primary">{{ account.display_name }}</td>
+                  <td class="nowrap">User #{{ account.user_id }}</td>
                   <td>{{ account.platform }}</td>
                   <td>{{ account.auth_type }}</td>
                   <td><span class="status-text">{{ account.status }}</span></td>
@@ -44,7 +135,7 @@
     {% else %}
       <div class="empty" role="status">
         Chưa kết nối Page hoặc tài khoản nào.
-        <div class="hint">Account credentials sẽ được quản lý ngoài dashboard.</div>
+        <div class="hint">Tạo mock account để thử luồng local mà không cần credential.</div>
       </div>
     {% endif %}
   </main>

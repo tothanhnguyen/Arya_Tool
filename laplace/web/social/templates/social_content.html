@@ -66,6 +66,24 @@
       font: 10.5px var(--mono);
     }
     .notice.err { border-style: dashed; }
+    .setup-grid {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px; margin-bottom: 22px;
+    }
+    .setup-card {
+      padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md);
+      background: var(--paper); box-shadow: var(--shadow-1);
+    }
+    .setup-card h3 { margin: 0 0 12px; font-size: 15px; }
+    .setup-card .studio-fields { grid-template-columns: 1fr; }
+    .setup-card .studio-field textarea { min-height: 86px; }
+    .setup-card .studio-action { justify-content: flex-end; }
+    .setup-note {
+      margin: -4px 0 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5;
+    }
+    @media (max-width: 980px) {
+      .setup-grid { grid-template-columns: 1fr; }
+    }
     @media (max-width: 820px) {
       .studio-grid { grid-template-columns: 1fr; }
     }
@@ -85,8 +103,162 @@
     {% include "_social_nav.html" %}
 
     {% if error %}
-      <div class="notice err">{{ error }}</div>
+      <div class="notice err" role="alert">{{ error }}</div>
+    {% elif notice %}
+      <div class="notice" role="status">{{ notice }}</div>
     {% endif %}
+
+    <section aria-labelledby="content-setup-title">
+      <h2 id="content-setup-title">Chuẩn bị nội dung</h2>
+      <div class="setup-grid">
+        <form class="setup-card" method="post" action="/social/media"
+              enctype="multipart/form-data">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <h3>1. Upload media</h3>
+          <p class="setup-note">JPEG, PNG, WebP hoặc MP4; server kiểm tra MIME, chữ ký và dung lượng.</p>
+          <div class="studio-fields">
+            <div class="studio-field">
+              <label for="media-user-id">Workspace user</label>
+              <select id="media-user-id" name="user_id" required>
+                <option value="">Chọn user</option>
+                {% for user in users %}
+                  <option value="{{ user.id }}"
+                    {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                    {{ user.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="media-file">Ảnh hoặc video</label>
+              <input id="media-file" type="file" name="file" required
+                     accept="image/jpeg,image/png,image/webp,video/mp4">
+            </div>
+          </div>
+          <div class="studio-action">
+            <button class="btn-ghost" type="submit" {% if not users %}disabled{% endif %}>
+              Lưu media
+            </button>
+          </div>
+        </form>
+
+        <form class="setup-card" method="post" action="/social/products">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <h3>2. Thêm affiliate product</h3>
+          <div class="studio-fields">
+            <div class="studio-field">
+              <label for="product-user-id">Workspace user</label>
+              <select id="product-user-id" name="user_id" required>
+                <option value="">Chọn user</option>
+                {% for user in users %}
+                  <option value="{{ user.id }}"
+                    {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                    {{ user.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="network">Affiliate network</label>
+              <input id="network" name="network" required maxlength="64"
+                     value="{{ form_values.network or '' }}" placeholder="Affiliate Demo">
+            </div>
+            <div class="studio-field">
+              <label for="merchant">Merchant</label>
+              <input id="merchant" name="merchant" required maxlength="200"
+                     value="{{ form_values.merchant or '' }}" placeholder="Demo Shop">
+            </div>
+            <div class="studio-field">
+              <label for="product-name">Tên sản phẩm</label>
+              <input id="product-name" name="product_name" required maxlength="500"
+                     value="{{ form_values.product_name or '' }}">
+            </div>
+            <div class="studio-field">
+              <label for="product-url">Product URL</label>
+              <input id="product-url" type="url" name="product_url" required maxlength="2000"
+                     value="{{ form_values.product_url or '' }}"
+                     placeholder="https://example.test/product">
+            </div>
+            <div class="studio-field">
+              <label for="affiliate-url">Affiliate URL</label>
+              <input id="affiliate-url" type="url" name="affiliate_url" required
+                     maxlength="2000" value="{{ form_values.affiliate_url or '' }}"
+                     placeholder="https://example.test/go">
+            </div>
+          </div>
+          <div class="studio-action">
+            <button class="btn-ghost" type="submit" {% if not users %}disabled{% endif %}>
+              Tạo product
+            </button>
+          </div>
+        </form>
+
+        <form class="setup-card" method="post" action="/social/content/drafts">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <h3>3. Tạo draft thủ công</h3>
+          <div class="studio-fields">
+            <div class="studio-field">
+              <label for="draft-user-id">Workspace user</label>
+              <select id="draft-user-id" name="user_id" required>
+                <option value="">Chọn user</option>
+                {% for user in users %}
+                  <option value="{{ user.id }}"
+                    {% if form_values.user_id == user.id|string %}selected{% endif %}>
+                    {{ user.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="draft-media-id">Media</label>
+              <select id="draft-media-id" name="media_asset_id" required>
+                <option value="">Chọn media</option>
+                {% for media in media_assets %}
+                  <option value="{{ media.id }}"
+                    {% if form_values.media_asset_id == media.id|string %}selected{% endif %}>
+                    User #{{ media.user_id }} · {{ media.original_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="draft-product-id">Affiliate product (tuỳ chọn)</label>
+              <select id="draft-product-id" name="affiliate_product_id">
+                <option value="">Không gắn sản phẩm</option>
+                {% for product in products %}
+                  <option value="{{ product.id }}"
+                    {% if form_values.affiliate_product_id == product.id|string %}selected{% endif %}>
+                    User #{{ product.user_id }} · {{ product.product_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="studio-field">
+              <label for="draft-title">Tiêu đề</label>
+              <input id="draft-title" name="title" required maxlength="300"
+                     value="{{ form_values.title or '' }}">
+            </div>
+            <div class="studio-field">
+              <label for="draft-caption">Caption</label>
+              <textarea id="draft-caption" name="caption" required
+                        maxlength="10000">{{ form_values.caption or '' }}</textarea>
+            </div>
+            <div class="studio-field">
+              <label for="draft-hashtags">Hashtag</label>
+              <input id="draft-hashtags" name="hashtags" maxlength="1000"
+                     value="{{ form_values.hashtags or '' }}"
+                     placeholder="#review, #deal">
+            </div>
+          </div>
+          <div class="studio-action">
+            <button class="btn-ghost" type="submit"
+                    {% if not users or not media_assets %}disabled{% endif %}>
+              Tạo draft
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <div class="studio-grid">
       <section aria-labelledby="generator-title">
@@ -124,7 +296,7 @@
                 {% for product in products %}
                   <option value="{{ product.id }}"
                     {% if form_values.affiliate_product_id == product.id|string %}selected{% endif %}>
-                    {{ product.product_name }} · {{ product.merchant }}
+                    User #{{ product.user_id }} · {{ product.product_name }} · {{ product.merchant }}
                   </option>
                 {% endfor %}
               </select>
@@ -136,7 +308,7 @@
                 {% for media in media_assets %}
                   <option value="{{ media.id }}"
                     {% if form_values.media_asset_id == media.id|string %}selected{% endif %}>
-                    {{ media.original_name }} · {{ media.type }}
+                    User #{{ media.user_id }} · {{ media.original_name }} · {{ media.type }}
                   </option>
                 {% endfor %}
               </select>

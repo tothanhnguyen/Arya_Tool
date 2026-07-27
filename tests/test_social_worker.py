@@ -184,28 +184,34 @@ def test_process_due_skips_future_jobs(session):
 
 
 def test_daily_limit_defers_without_calling_publisher(session):
-    job_id = _seed_job(session)
+    now = datetime(2026, 7, 27, 16, 30, tzinfo=UTC)
+    prior_published_at = now - timedelta(hours=1)
+    job_id = _seed_job(session, scheduled_at=now - timedelta(seconds=1))
     session.commit()
     with session_scope() as db:
         job = db.get(PublishJob, job_id)
         assert job is not None
+        job.social_account.timezone = "Asia/Ho_Chi_Minh"
         job.social_account.daily_post_limit = 1
         prior = PublishJob(
             social_post_id=job.social_post_id,
             social_account_id=job.social_account_id,
-            scheduled_at=datetime.now(UTC) - timedelta(hours=2),
+            scheduled_at=prior_published_at,
             status="published",
             idempotency_key="e" * 64,
-            published_at=datetime.now(UTC) - timedelta(hours=1),
+            published_at=prior_published_at,
         )
         db.add(prior)
 
     publisher = MockPublisher()
-    outcome = PublishWorker(publisher).process_job(job_id)
+    outcome = PublishWorker(publisher).process_job(job_id, now=now)
     job = _reload_job(job_id)
 
     assert outcome.status == "retry"
     assert job.next_retry_at is not None
+    assert job.next_retry_at.replace(tzinfo=UTC) == datetime(
+        2026, 7, 27, 17, tzinfo=UTC
+    )
     assert job.attempt_count == 0
     assert publisher.call_count == 0
 

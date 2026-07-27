@@ -20,28 +20,43 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 _worker: PublishWorker | None = None
 _notifier: SocialNotificationService | None = None
+_daily_summary_hour = 20
 
 
 def run_publish_tick() -> list[WorkerOutcome]:
     """Process one bounded batch. Exceptions are contained by the scheduler."""
     if _worker is None:
         return []
+    if _notifier is not None:
+        try:
+            _notifier.initialize_delivery_tracking()
+        except Exception:
+            logger.exception("Social notification tracking refresh failed")
+    outcomes: list[WorkerOutcome] = []
     try:
         outcomes = _worker.process_due()
     except Exception:
         logger.exception("Social publish tick failed")
-        return []
     if outcomes:
         logger.info(
             "Social publish tick processed %d job(s): %s",
             len(outcomes),
             ", ".join(f"{item.job_id}:{item.status}" for item in outcomes),
         )
-        if _notifier is not None:
+    if _notifier is not None:
+        try:
+            _notifier.notify_pending_outcomes()
+        except Exception:
+            logger.exception("Pending social publish notifications failed")
+        if outcomes:
             try:
                 _notifier.notify_outcomes(outcomes)
             except Exception:
                 logger.exception("Social publish notifications failed")
+        try:
+            _notifier.send_daily_summaries_if_due(hour=_daily_summary_hour)
+        except Exception:
+            logger.exception("Social daily summary catch-up failed")
     return outcomes
 
 
@@ -49,7 +64,7 @@ def run_daily_summary() -> int:
     if _notifier is None:
         return 0
     try:
-        return _notifier.send_daily_summaries()
+        return _notifier.send_daily_summaries_if_due(hour=_daily_summary_hour)
     except Exception:
         logger.exception("Social daily summary failed")
         return 0
@@ -67,7 +82,7 @@ def start_social_scheduler(
     daily_summary_hour: int = 20,
 ) -> BackgroundScheduler:
     """Start the isolated social worker loop. Idempotent."""
-    global _scheduler, _worker, _notifier
+    global _daily_summary_hour, _scheduler, _worker, _notifier
 
     settings = get_settings()
     seconds = interval_seconds or settings.social_poll_seconds
@@ -84,8 +99,14 @@ def start_social_scheduler(
             settings.telegram_bot_token,
             timezone_name=settings.social_timezone,
         )
+    if _notifier is not None:
+        try:
+            _notifier.initialize_delivery_tracking()
+        except Exception:
+            logger.exception("Social notification tracking initialization failed")
 
     if _scheduler is None:
+        _daily_summary_hour = daily_summary_hour
         _scheduler = BackgroundScheduler(timezone=settings.social_timezone)
         _scheduler.add_job(
             run_publish_tick,
@@ -111,9 +132,10 @@ def start_social_scheduler(
 
 
 def stop_social_scheduler() -> None:
-    global _scheduler, _worker, _notifier
+    global _daily_summary_hour, _scheduler, _worker, _notifier
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
     _scheduler = None
     _worker = None
     _notifier = None
+    _daily_summary_hour = 20

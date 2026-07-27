@@ -18,15 +18,25 @@ class FakeWorker:
 class FakeNotifier:
     def __init__(self):
         self.outcome_calls = []
+        self.pending_calls = 0
         self.daily_calls = 0
+        self.tracking_calls = 0
 
     def notify_outcomes(self, outcomes):
         self.outcome_calls.append(outcomes)
         return len(outcomes)
 
-    def send_daily_summaries(self):
+    def notify_pending_outcomes(self):
+        self.pending_calls += 1
+        return 0
+
+    def send_daily_summaries_if_due(self, *, hour):
         self.daily_calls += 1
         return 1
+
+    def initialize_delivery_tracking(self):
+        self.tracking_calls += 1
+        return 0
 
 
 def test_publish_tick_is_noop_before_scheduler_starts():
@@ -44,9 +54,12 @@ def test_publish_tick_uses_configured_worker(monkeypatch):
 
     assert scheduler_module.run_publish_tick() == outcomes
     assert worker.calls == 1
+    assert notifier.tracking_calls == 1
+    assert notifier.pending_calls == 1
     assert notifier.outcome_calls == [outcomes]
-    assert scheduler_module.run_daily_summary() == 1
     assert notifier.daily_calls == 1
+    assert scheduler_module.run_daily_summary() == 1
+    assert notifier.daily_calls == 2
 
     scheduler_module.stop_social_scheduler()
 
@@ -54,9 +67,12 @@ def test_publish_tick_uses_configured_worker(monkeypatch):
 def test_social_scheduler_starts_once_and_stops(session):
     scheduler_module.stop_social_scheduler()
     session.commit()
+    notifier = FakeNotifier()
 
     first = scheduler_module.start_social_scheduler(
-        publisher=MockPublisher(), interval_seconds=3600
+        publisher=MockPublisher(),
+        interval_seconds=3600,
+        notifier=notifier,
     )
     second = scheduler_module.start_social_scheduler(
         publisher=MockPublisher(), interval_seconds=3600
@@ -68,6 +84,7 @@ def test_social_scheduler_starts_once_and_stops(session):
         "social_publish_worker",
         "social_daily_summary",
     }
+    assert notifier.tracking_calls == 2
 
     scheduler_module.stop_social_scheduler()
     assert not scheduler_module.is_social_scheduler_running()

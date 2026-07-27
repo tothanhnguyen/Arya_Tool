@@ -1,5 +1,6 @@
 """Tests for owner-only social outcome notifications and daily summaries."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 from laplace.bot.social_notifications import SocialNotificationService
@@ -202,4 +203,150 @@ def test_failed_delivery_is_not_marked_and_can_retry(session):
 
     assert service.notify_outcomes([outcome]) == 0
     assert service.notify_outcomes([outcome]) == 1
+    assert len(sender.messages) == 1
+
+
+def test_pending_terminal_delivery_retries_after_service_restart_without_outcome(session):
+    at = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    user_id, job_id = _seed_job(
+        session,
+        suffix="f",
+        tg_id=666,
+        status="published",
+        at=at,
+    )
+    session.commit()
+    sender = FakeSender(fail_count=1)
+    first_service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+        now=lambda: at,
+    )
+    assert first_service.initialize_delivery_tracking(at - timedelta(minutes=1)) == 1
+
+    assert first_service.notify_pending_outcomes(at) == 0
+
+    restarted_service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+        now=lambda: at + timedelta(minutes=1),
+    )
+    assert restarted_service.notify_pending_outcomes() == 1
+    assert restarted_service.notify_pending_outcomes() == 0
+    assert len(sender.messages) == 1
+    with session_scope() as db:
+        profile = db.get(User, user_id).profile_json
+    assert f"job:{job_id}:published" in profile["social_notification_keys"]
+
+
+def test_tracking_initialization_does_not_replay_historical_terminal_jobs(session):
+    at = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    _seed_job(
+        session,
+        suffix="g",
+        tg_id=777,
+        status="published",
+        at=at - timedelta(days=1),
+    )
+    session.commit()
+    sender = FakeSender()
+    service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+        now=lambda: at,
+    )
+
+    assert service.initialize_delivery_tracking() == 1
+    assert service.notify_pending_outcomes() == 0
+    assert sender.messages == []
+
+
+def test_failed_current_outcome_moves_tracking_back_for_durable_retry(session):
+    at = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    _, job_id = _seed_job(
+        session,
+        suffix="j",
+        tg_id=1010,
+        status="published",
+        at=at,
+    )
+    session.commit()
+    sender = FakeSender(fail_count=1)
+    service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+    )
+    assert service.initialize_delivery_tracking(at + timedelta(minutes=1)) == 1
+
+    assert service.notify_outcomes([WorkerOutcome(job_id, "published", True)]) == 0
+
+    restarted_service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+    )
+    assert restarted_service.notify_pending_outcomes(at + timedelta(minutes=2)) == 1
+    assert len(sender.messages) == 1
+
+
+def test_daily_summary_retries_and_catches_up_after_configured_hour(session):
+    at = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    _seed_job(
+        session,
+        suffix="h",
+        tg_id=888,
+        status="published",
+        at=at - timedelta(hours=1),
+    )
+    session.commit()
+    sender = FakeSender(fail_count=1)
+    service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+    )
+
+    assert service.send_daily_summaries_if_due(hour=20, at=at - timedelta(minutes=1)) == 0
+    assert service.send_daily_summaries_if_due(hour=20, at=at) == 0
+
+    restarted_service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+    )
+    assert (
+        restarted_service.send_daily_summaries_if_due(
+            hour=20,
+            at=at + timedelta(hours=1),
+        )
+        == 1
+    )
+    assert (
+        restarted_service.send_daily_summaries_if_due(
+            hour=20,
+            at=at + timedelta(hours=2),
+        )
+        == 0
+    )
+    assert len(sender.messages) == 1
+
+
+def test_concurrent_terminal_delivery_is_serialized_in_process(session):
+    at = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    _, job_id = _seed_job(
+        session,
+        suffix="i",
+        tg_id=999,
+        status="published",
+        at=at,
+    )
+    session.commit()
+    sender = FakeSender()
+    service = SocialNotificationService(
+        sender,
+        timezone_name="Asia/Ho_Chi_Minh",
+    )
+    outcome = WorkerOutcome(job_id, "published", True)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: service.notify_outcomes([outcome]), range(2)))
+
+    assert sum(results) == 1
     assert len(sender.messages) == 1

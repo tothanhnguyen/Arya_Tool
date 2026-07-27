@@ -7,6 +7,7 @@ database.
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -221,9 +223,10 @@ class AffiliateEvent(Base):
         ),
         CheckConstraint("amount >= 0", name="ck_affiliate_event_amount"),
         UniqueConstraint(
+            "user_id",
             "source",
             "external_event_id",
-            name="uq_affiliate_event_source_external",
+            name="uq_affiliate_event_owner_source_external",
         ),
         Index("ix_affiliate_events_user_occurred", "user_id", "occurred_at"),
         Index("ix_affiliate_events_type_occurred", "event_type", "occurred_at"),
@@ -245,7 +248,10 @@ class AffiliateEvent(Base):
         ForeignKey("publish_jobs.id"), nullable=True
     )
     event_type: Mapped[str] = mapped_column(String(24))
-    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6),
+        default=Decimal(0),
+    )
     currency: Mapped[str] = mapped_column(String(8), default="VND")
     source: Mapped[str] = mapped_column(String(64), default="manual")
     external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -13,6 +13,12 @@
     </div>
     {% include "_social_nav.html" %}
 
+    {% if error %}
+      <div class="notice err" role="alert">{{ error }}</div>
+    {% elif notice %}
+      <div class="notice" role="status">{{ notice }}</div>
+    {% endif %}
+
     {% if jobs %}
       <div class="table-card">
         <div class="table-scroll">
@@ -26,6 +32,7 @@
                 <th scope="col">Scheduled for</th>
                 <th scope="col" class="num">Attempts</th>
                 <th scope="col">Status</th>
+                <th scope="col"><span class="sr-only">Thao tác</span></th>
               </tr>
             </thead>
             <tbody>
@@ -40,6 +47,18 @@
                   <td class="nowrap">{{ job.scheduled_at.strftime("%d/%m/%Y %H:%M") }}</td>
                   <td class="num">{{ job.attempt_count }}</td>
                   <td><span class="status-text">{{ job.status }}</span></td>
+                  <td>
+                    {% if job.status in cancellable_statuses %}
+                      <form method="post" action="/social/jobs/{{ job.id }}/cancel">
+                        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="user_id" value="{{ job.user_id }}">
+                        {% if status_filter %}
+                          <input type="hidden" name="status_filter" value="{{ status_filter }}">
+                        {% endif %}
+                        <button class="btn-ghost" type="submit">Hủy</button>
+                      </form>
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>

@@ -8,17 +8,18 @@ Kế hoạch chuyển toàn bộ dữ liệu bền vững sang Supabase:
 - ✅ Phase 0–2: fork, social domain, MockPublisher, worker, idempotency,
   concurrency/recovery, cooldown và daily limit.
 - ✅ Phase 3 core: ba agent tool đã đăng ký và dùng confirm predicate.
-- 🟡 Phase 4: dashboard đọc dữ liệu thật và REST vertical flow đã có; form web
-  ghi dữ liệu/CSRF chưa làm.
+- ✅ Phase 4: dashboard và form web hoàn tất vertical flow local, có CSRF,
+  owner relation check, upload validation và approval gate.
 - ✅ Content Studio: 6 preset văn phong, copywriter OpenRouter Free tách khỏi
   agent chính, kiểm tra deterministic và approval gate đã hoàn thành.
 - ✅ Facebook/Instagram connect: browser profile tách biệt, user tự đăng nhập,
   owner isolation và không nhập/đọc cookie.
-- 🟡 Phase 5: sáu lệnh Telegram và owner-only confirm pause/resume đã có;
-  notification/daily summary tự động chưa làm.
-- ⏳ Phase 6: Meta Graph, import đối soát và analytics chưa bật.
-- ⏳ Phase S0–S7: chuyển 17 bảng, media và dashboard identity sang Supabase
-  Postgres/Storage/Auth; chi tiết trong `PLAN_SUPABASE.md`.
+- ✅ Phase 5: sáu lệnh Telegram, owner-only confirm pause/resume, notification
+  retry bền vững và daily summary same-day catch-up đã hoàn thành.
+- 🟡 Phase 6: import CSV và analytics owner-scoped đã hoàn thành; Meta Graph
+  adapter thật vẫn khóa.
+- 🟡 Phase S0–S5: schema 18 bảng, database/storage adapter, RLS, artifact
+  metadata và ETL đã sẵn sàng local; Auth session, remote cutover và S7 còn chờ.
 
 ## Nguyên tắc
 
@@ -87,8 +88,8 @@ Create/update/delete/schedule/publish/pause phải đi qua confirm flow phù h�
   user/account; chỉ lưu `auth_ref` opaque, không nhận cookie, token hoặc mật khẩu.
 - API key/admin session bắt buộc cho write actions; CSRF cho form.
 
-**Trạng thái:** Content Studio, draft/approve và form kết nối Facebook/Instagram
-đã xong; Phase 4 tổng thể vẫn còn các form quản trị upload/schedule.
+**Trạng thái:** Hoàn thành local: Content Studio, kết nối Facebook/Instagram,
+mock account, upload media, product/draft, approve, schedule và cancel.
 
 **Done khi:** hoàn thành vertical flow từ upload đến MockPublisher trên localhost.
 
@@ -106,6 +107,10 @@ Create/update/delete/schedule/publish/pause phải đi qua confirm flow phù h�
 - Browser-profile adapter chỉ là opt-in experiment, tách biệt credential và tự dừng khi checkpoint.
 - Import CSV affiliate theo batch, map `sub_id` về post/job.
 - Metrics: commission/post, EPC khi có click, top product/account/time.
+
+**Trạng thái:** Import/analytics đã hoàn thành với `Decimal`/`NUMERIC(18,6)`,
+event ID theo owner, atomic conflict handling và `/stats` fail closed khi chưa
+xác định được owner. Meta Graph API thật chưa bật.
 
 **Done khi:** một Page thử nghiệm đăng thành công qua API, import CSV đối soát đúng và toàn bộ hardening tests pass.
 

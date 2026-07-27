@@ -1,26 +1,26 @@
 # Arya_Tool — Kế hoạch chuyển toàn bộ dữ liệu sang Supabase
 
 Trạng thái: **đã chuẩn bị local; chờ project/key để push và cutover**  
-Ngày lập: **2026-07-27**
+Ngày cập nhật: **2026-07-28**
 
 Tiến độ ngày 2026-07-27:
 
 | Phase | Trạng thái |
 |---|---|
 | S0 config/CLI scaffold | Xong local; chưa link remote |
-| S1 schema 17 bảng | Xong migration; chờ `db push` |
+| S1 schema 18 bảng | Xong migration; chờ `db push` |
 | S2 database adapter | Xong SQLite/Postgres adapter và unit test |
-| S3 Auth/RLS | Xong SQL trigger/policy; dashboard Auth session chưa nối |
-| S4 Storage | Xong media adapter + private bucket policy; artifacts chưa nối |
-| S5 ETL | Xong dry-run/execute, JSON + Markdown report; chưa chạy remote |
-| S6 cutover/rollback | Chưa chạy vì chưa có project credential |
+| S3 Auth/RLS | Xong SQL trigger/policy; `/stats` fail closed, Auth session chưa nối |
+| S4 Storage | Xong local media + private artifact service/RLS; chưa chạy remote |
+| S5 ETL | Xong local dry-run/execute/reconciliation media + artifact; chưa chạy remote |
+| S6 cutover/rollback | Xong checklist generator local; chưa diễn tập/cutover remote |
 | S7 vận hành | Chưa triển khai |
 
 ## 1. Mục tiêu
 
 Chuyển nguồn dữ liệu chính của Arya_Tool từ SQLite và filesystem cục bộ sang:
 
-- **Supabase Postgres:** toàn bộ 17 bảng nghiệp vụ.
+- **Supabase Postgres:** toàn bộ 18 bảng nghiệp vụ/metadata.
 - **Supabase Storage:** media, file import và report cần lưu lâu dài.
 - **Supabase Auth:** đăng nhập dashboard và định danh owner.
 - **Row Level Security (RLS):** cô lập dữ liệu theo owner.
@@ -33,7 +33,7 @@ viết lại toàn bộ ứng dụng sang Data API.
 
 | Thành phần | Đích | Lý do |
 |---|---|---|
-| 17 bảng SQL | Supabase Postgres | Một nguồn dữ liệu chung, có constraint và transaction |
+| 18 bảng SQL | Supabase Postgres | Một nguồn dữ liệu chung, có constraint và transaction |
 | Media ảnh/video | Private Storage `arya-media` | Không phụ thuộc thư mục `media/` trên một máy |
 | CSV import, report/eval cần lưu | Private Storage `arya-artifacts` | Quản lý tập trung, tải qua signed URL |
 | User dashboard | Supabase Auth + `public.users` | Có session rõ ràng và map owner cho RLS |
@@ -83,12 +83,13 @@ Nhóm social affiliate:
 - `social_posts`, `content_generations`
 - `publish_jobs`, `publish_attempts`
 - `affiliate_events`
+- `artifacts`
 
 Thứ tự import phải theo foreign key:
 
 1. `users`
 2. `conversations`, `notes`, `todos`, `scheduled_jobs`,
-   `social_accounts`, `media_assets`, `affiliate_products`
+   `social_accounts`, `media_assets`, `affiliate_products`, `artifacts`
 3. `tasks`, `messages`, `social_posts`
 4. `steps`, `llm_calls`, `content_generations`, `publish_jobs`
 5. `publish_attempts`, `affiliate_events`
@@ -331,7 +332,7 @@ Không xóa SQLite cũ trước khi cutover và rollback drill đều pass.
 
 ## 14. Definition of Done
 
-- 17/17 bảng dùng Supabase Postgres làm source of truth.
+- 18/18 bảng dùng Supabase Postgres làm source of truth.
 - Media/import/report bền vững nằm trong private Supabase Storage.
 - Dashboard dùng Supabase Auth; RLS chặn cross-owner.
 - Unit test SQLite và integration test PostgreSQL đều pass.

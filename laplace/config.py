@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     supabase_secret_key: str | None = None
     supabase_media_bucket: str = "arya-media"
     supabase_artifact_bucket: str = "arya-artifacts"
+    supabase_artifact_max_bytes: int = 50 * 1024 * 1024
     supabase_signed_url_ttl_s: int = 300
 
     # Social publishing stays local-first. Real adapters are opt-in; the
@@ -78,4 +80,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # CI and security-sensitive diagnostics can explicitly avoid loading the
+    # user-owned .env while retaining normal local application behavior.
+    env_file = None if os.environ.get("LAPLACE_DISABLE_ENV_FILE") == "1" else _ENV_FILE
+    return Settings(_env_file=env_file)

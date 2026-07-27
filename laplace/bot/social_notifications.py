@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
@@ -21,9 +22,10 @@ logger = logging.getLogger(__name__)
 TG_CHUNK = 4000
 PROFILE_OUTCOME_KEYS = "social_notification_keys"
 PROFILE_DAILY_SUMMARY = "social_daily_summary"
-MAX_OUTCOME_KEYS = 200
+PROFILE_TRACKING_STARTED_AT = "social_notification_tracking_started_at"
 TERMINAL_STATUSES = frozenset({"published", "failed"})
 ACCOUNT_ALERT_STATUSES = frozenset({"checkpoint", "expired"})
+_DELIVERY_LOCK = threading.RLock()
 
 
 class MessageSender(Protocol):
@@ -65,27 +67,14 @@ def _profile(user: User) -> dict:
     return dict(user.profile_json or {})
 
 
-def _outcome_was_sent(user_id: int, key: str) -> bool:
-    with session_scope() as session:
-        user = session.get(User, user_id)
-        if user is None:
-            return True
-        keys = _profile(user).get(PROFILE_OUTCOME_KEYS, [])
-        return isinstance(keys, list) and key in keys
-
-
-def _mark_outcome_sent(user_id: int, key: str) -> None:
-    with session_scope() as session:
-        user = session.get(User, user_id)
-        if user is None:
-            return
-        profile = _profile(user)
-        raw_keys = profile.get(PROFILE_OUTCOME_KEYS, [])
-        keys = [item for item in raw_keys if isinstance(item, str)] if isinstance(raw_keys, list) else []
-        if key not in keys:
-            keys.append(key)
-        profile[PROFILE_OUTCOME_KEYS] = keys[-MAX_OUTCOME_KEYS:]
-        user.profile_json = profile
+def _tracking_started_at(profile: dict) -> datetime | None:
+    raw = profile.get(PROFILE_TRACKING_STARTED_AT)
+    if not isinstance(raw, str):
+        return None
+    try:
+        return _as_utc(datetime.fromisoformat(raw))
+    except ValueError:
+        return None
 
 
 def _daily_was_sent(user: User, local_day: str, timezone_name: str) -> bool:
@@ -97,40 +86,45 @@ def _daily_was_sent(user: User, local_day: str, timezone_name: str) -> bool:
     )
 
 
-def _mark_daily_sent(user_id: int, local_day: str, timezone_name: str) -> None:
-    with session_scope() as session:
-        user = session.get(User, user_id)
-        if user is None:
-            return
-        profile = _profile(user)
-        profile[PROFILE_DAILY_SUMMARY] = {
-            "date": local_day,
-            "timezone": timezone_name,
-        }
-        user.profile_json = profile
+def _outcome_query():
+    return (
+        select(
+            PublishJob.id,
+            PublishJob.status,
+            PublishJob.updated_at,
+            SocialPost.title,
+            SocialPost.user_id,
+            SocialAccount.display_name,
+            SocialAccount.status.label("account_status"),
+            User.tg_id,
+            User.profile_json,
+        )
+        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+        .join(User, SocialPost.user_id == User.id)
+        .where(SocialAccount.user_id == SocialPost.user_id)
+    )
 
 
 def _outcome_snapshot(job_id: int) -> dict | None:
     with session_scope() as session:
         row = session.execute(
-            select(
-                PublishJob.id,
-                PublishJob.status,
-                SocialPost.title,
-                SocialPost.user_id,
-                SocialAccount.display_name,
-                SocialAccount.status.label("account_status"),
-                User.tg_id,
-            )
-            .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
-            .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
-            .join(User, SocialPost.user_id == User.id)
-            .where(
-                PublishJob.id == job_id,
-                SocialAccount.user_id == SocialPost.user_id,
-            )
+            _outcome_query().where(PublishJob.id == job_id)
         ).mappings().one_or_none()
         return dict(row) if row is not None else None
+
+
+def _terminal_snapshots() -> list[dict]:
+    with session_scope() as session:
+        rows = session.execute(
+            _outcome_query()
+            .where(
+                PublishJob.status.in_(TERMINAL_STATUSES),
+                User.tg_id.is_not(None),
+            )
+            .order_by(PublishJob.updated_at, PublishJob.id)
+        ).mappings()
+        return [dict(row) for row in rows]
 
 
 def _outcome_text(snapshot: dict) -> str:
@@ -257,6 +251,63 @@ class SocialNotificationService:
         self.timezone_name = timezone_name
         self.now = now or (lambda: datetime.now(UTC))
 
+    def initialize_delivery_tracking(self, at: datetime | None = None) -> int:
+        """Start durable scans without replaying terminal jobs from before rollout."""
+        started_at = _as_utc(at or self.now()).isoformat()
+        initialized = 0
+        with _DELIVERY_LOCK, session_scope() as session:
+            users = session.scalars(
+                select(User)
+                .where(User.tg_id.is_not(None))
+                .order_by(User.id)
+                .with_for_update()
+            ).all()
+            for user in users:
+                profile = _profile(user)
+                if _tracking_started_at(profile) is not None:
+                    continue
+                profile[PROFILE_TRACKING_STARTED_AT] = started_at
+                user.profile_json = profile
+                initialized += 1
+        return initialized
+
+    def _ensure_tracking_started(self, user_id: int, at: datetime) -> None:
+        requested_start = _as_utc(at)
+        with _DELIVERY_LOCK, session_scope() as session:
+            user = session.scalar(
+                select(User).where(User.id == user_id).with_for_update()
+            )
+            if user is None:
+                return
+            profile = _profile(user)
+            existing_start = _tracking_started_at(profile)
+            if existing_start is None or requested_start < existing_start:
+                profile[PROFILE_TRACKING_STARTED_AT] = requested_start.isoformat()
+                user.profile_json = profile
+
+    def _deliver_outcome(self, snapshot: dict) -> bool:
+        key = f"job:{snapshot['id']}:{snapshot['status']}"
+        with _DELIVERY_LOCK, session_scope() as session:
+            user = session.scalar(
+                select(User).where(User.id == int(snapshot["user_id"])).with_for_update()
+            )
+            if user is None or user.tg_id is None:
+                return False
+            profile = _profile(user)
+            raw_keys = profile.get(PROFILE_OUTCOME_KEYS, [])
+            keys = (
+                [item for item in raw_keys if isinstance(item, str)]
+                if isinstance(raw_keys, list)
+                else []
+            )
+            if key in keys:
+                return False
+            self.sender.send(int(user.tg_id), _outcome_text(snapshot))
+            keys.append(key)
+            profile[PROFILE_OUTCOME_KEYS] = keys
+            user.profile_json = profile
+        return True
+
     def notify_outcomes(self, outcomes: list[WorkerOutcome]) -> int:
         """Send terminal outcomes only; retries/deferred states stay silent."""
         delivered = 0
@@ -270,21 +321,84 @@ class SocialNotificationService:
                 or snapshot["tg_id"] is None
             ):
                 continue
-            key = f"job:{snapshot['id']}:{snapshot['status']}"
             user_id = int(snapshot["user_id"])
-            if _outcome_was_sent(user_id, key):
-                continue
+            self._ensure_tracking_started(user_id, _as_utc(snapshot["updated_at"]))
             try:
-                self.sender.send(int(snapshot["tg_id"]), _outcome_text(snapshot))
+                was_delivered = self._deliver_outcome(snapshot)
             except Exception:
                 logger.exception(
                     "Social outcome notification failed job=%s",
                     snapshot["id"],
                 )
                 continue
-            _mark_outcome_sent(user_id, key)
-            delivered += 1
+            delivered += int(was_delivered)
         return delivered
+
+    def notify_pending_outcomes(
+        self,
+        at: datetime | None = None,
+        *,
+        limit: int = 100,
+    ) -> int:
+        """Retry unsent terminal jobs from the database, independent of worker outcomes."""
+        if limit < 1:
+            return 0
+        current = _as_utc(at or self.now())
+        delivered = 0
+        users_without_tracking: set[int] = set()
+        for snapshot in _terminal_snapshots():
+            user_id = int(snapshot["user_id"])
+            profile = (
+                dict(snapshot["profile_json"])
+                if isinstance(snapshot["profile_json"], dict)
+                else {}
+            )
+            tracking_started = _tracking_started_at(profile)
+            if tracking_started is None:
+                users_without_tracking.add(user_id)
+                continue
+            if _as_utc(snapshot["updated_at"]) < tracking_started:
+                continue
+            try:
+                was_delivered = self._deliver_outcome(snapshot)
+            except Exception:
+                logger.exception(
+                    "Pending social notification failed job=%s",
+                    snapshot["id"],
+                )
+                continue
+            delivered += int(was_delivered)
+            if delivered >= limit:
+                break
+        for user_id in users_without_tracking:
+            self._ensure_tracking_started(user_id, current)
+        return delivered
+
+    def _deliver_daily(
+        self,
+        user_id: int,
+        *,
+        local_day: str,
+        text: str,
+    ) -> bool:
+        with _DELIVERY_LOCK, session_scope() as session:
+            user = session.scalar(
+                select(User).where(User.id == user_id).with_for_update()
+            )
+            if (
+                user is None
+                or user.tg_id is None
+                or _daily_was_sent(user, local_day, self.timezone_name)
+            ):
+                return False
+            self.sender.send(int(user.tg_id), text)
+            profile = _profile(user)
+            profile[PROFILE_DAILY_SUMMARY] = {
+                "date": local_day,
+                "timezone": self.timezone_name,
+            }
+            user.profile_json = profile
+        return True
 
     def send_daily_summaries(self, at: datetime | None = None) -> int:
         current = _as_utc(at or self.now()).astimezone(self.timezone)
@@ -299,14 +413,14 @@ class SocialNotificationService:
                 select(User).where(User.tg_id.is_not(None)).order_by(User.id)
             ).all()
             recipients = [
-                (user.id, int(user.tg_id))
+                user.id
                 for user in users
                 if user.tg_id is not None
                 and not _daily_was_sent(user, local_day, self.timezone_name)
             ]
 
         delivered = 0
-        for user_id, tg_id in recipients:
+        for user_id in recipients:
             summary = _daily_snapshot(
                 user_id,
                 start_utc=start_utc,
@@ -322,13 +436,29 @@ class SocialNotificationService:
                 f"• Tài khoản cần xử lý: {summary['alerts']}"
             )
             try:
-                self.sender.send(tg_id, text)
+                was_delivered = self._deliver_daily(
+                    user_id,
+                    local_day=local_day,
+                    text=text,
+                )
             except Exception:
                 logger.exception("Daily social summary failed user=%s", user_id)
                 continue
-            _mark_daily_sent(user_id, local_day, self.timezone_name)
-            delivered += 1
+            delivered += int(was_delivered)
         return delivered
+
+    def send_daily_summaries_if_due(
+        self,
+        *,
+        hour: int,
+        at: datetime | None = None,
+    ) -> int:
+        if not 0 <= hour <= 23:
+            raise ValueError("daily summary hour must be between 0 and 23")
+        current = _as_utc(at or self.now())
+        if current.astimezone(self.timezone).hour < hour:
+            return 0
+        return self.send_daily_summaries(current)
 
 
 def build_social_notifier(

@@ -25,13 +25,17 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from laplace.config import get_settings
 from laplace.db import _normalize_db_url
+from laplace.services.artifacts import (
+    ArtifactValidationError,
+    artifact_object_key,
+)
 from laplace.social.storage import (
     StorageConfigurationError,
     StorageError,
     get_media_storage,
 )
 
-TABLE_ORDER = (
+CORE_TABLE_ORDER = (
     "users",
     "conversations",
     "messages",
@@ -50,6 +54,8 @@ TABLE_ORDER = (
     "publish_attempts",
     "affiliate_events",
 )
+OPTIONAL_TABLE_ORDER = ("artifacts",)
+TABLE_ORDER = CORE_TABLE_ORDER + OPTIONAL_TABLE_ORDER
 
 
 class MigrationError(RuntimeError):
@@ -74,6 +80,11 @@ class MigrationReport:
     local_media_rows: int = 0
     missing_media_files: int = 0
     media_bytes: int = 0
+    artifact_rows: int = 0
+    artifact_bytes: int = 0
+    artifact_objects: int = 0
+    invalid_artifact_rows: int = 0
+    artifacts_by_kind: dict[str, int] = field(default_factory=dict)
     orphan_foreign_keys: dict[str, int] = field(default_factory=dict)
     social_post_statuses: dict[str, int] = field(default_factory=dict)
     publish_job_statuses: dict[str, int] = field(default_factory=dict)
@@ -124,6 +135,49 @@ def _inventory_media(
         report.media_bytes += path.stat().st_size
 
 
+def _inventory_artifacts(
+    connection: Connection,
+    table: Table,
+    report: MigrationReport,
+) -> None:
+    rows = connection.execute(
+        select(
+            table.c.kind,
+            table.c.user_id,
+            table.c.original_name,
+            table.c.size_bytes,
+            table.c.sha256,
+            table.c.storage_bucket,
+            table.c.storage_key,
+            table.c.status,
+        )
+    )
+    objects: set[tuple[str, str]] = set()
+    for row in rows:
+        report.artifact_rows += 1
+        report.artifacts_by_kind[str(row.kind)] = (
+            report.artifacts_by_kind.get(str(row.kind), 0) + 1
+        )
+        try:
+            expected_key = artifact_object_key(
+                int(row.user_id),
+                str(row.sha256),
+                str(row.original_name),
+            )
+        except ArtifactValidationError:
+            report.invalid_artifact_rows += 1
+        else:
+            if (
+                row.storage_bucket != "arya-artifacts"
+                or row.storage_key != expected_key
+            ):
+                report.invalid_artifact_rows += 1
+        if row.status != "deleted":
+            report.artifact_bytes += int(row.size_bytes)
+            objects.add((str(row.storage_bucket), str(row.storage_key)))
+    report.artifact_objects = len(objects)
+
+
 def inspect_source(source_url: str) -> MigrationReport:
     source = create_engine(source_url)
     if source.dialect.name != "sqlite":
@@ -135,7 +189,8 @@ def inspect_source(source_url: str) -> MigrationReport:
     with source.connect() as connection:
         for table_name in TABLE_ORDER:
             if table_name not in existing:
-                report.missing_tables.append(table_name)
+                if table_name in CORE_TABLE_ORDER:
+                    report.missing_tables.append(table_name)
                 continue
             table = Table(table_name, metadata, autoload_with=connection)
             count = int(
@@ -144,6 +199,8 @@ def inspect_source(source_url: str) -> MigrationReport:
             report.tables[table_name] = TableResult(source_rows=count)
             if table_name == "media_assets":
                 _inventory_media(connection, table, report)
+            elif table_name == "artifacts":
+                _inventory_artifacts(connection, table, report)
 
         if "social_posts" in existing:
             rows = connection.execute(
@@ -196,6 +253,7 @@ def inspect_source(source_url: str) -> MigrationReport:
     report.completed = not (
         report.missing_tables
         or report.missing_media_files
+        or report.invalid_artifact_rows
         or report.orphan_foreign_keys
     )
     source.dispose()
@@ -218,6 +276,7 @@ def _prepare_media_row(
     row: dict[str, Any],
     *,
     storage,
+    created_uploads: list[Any] | None = None,
 ) -> dict[str, Any]:
     if row.get("storage_backend", "local") == "supabase":
         return row
@@ -246,6 +305,8 @@ def _prepare_media_row(
         payload=payload,
         content_type=row["mime_type"],
     )
+    if created_uploads is not None and stored.created:
+        created_uploads.append(stored)
     row.update(
         local_path=stored.location,
         storage_backend=stored.backend,
@@ -301,6 +362,10 @@ def migrate(
         raise MigrationError(
             "SQLite media inventory contains missing files; repair them first"
         )
+    if inventory.invalid_artifact_rows:
+        raise MigrationError(
+            "SQLite artifact inventory contains invalid metadata; repair it first"
+        )
 
     try:
         storage = get_media_storage() if inventory.local_media_rows else None
@@ -326,64 +391,90 @@ def migrate(
 
     source_metadata = MetaData()
     target_metadata = MetaData()
+    created_media_uploads: list[Any] = []
     try:
-        with source.connect() as source_connection, target.begin() as target_connection:
-            for table_name in TABLE_ORDER:
-                source_table = Table(
-                    table_name,
-                    source_metadata,
-                    autoload_with=source_connection,
-                )
-                target_table = Table(
-                    table_name,
-                    target_metadata,
-                    schema="public",
-                    autoload_with=target_connection,
-                )
-                target_columns = set(target_table.c.keys())
-                result = inventory.tables[table_name]
+        try:
+            with (
+                source.connect() as source_connection,
+                target.begin() as target_connection,
+            ):
+                for table_name in TABLE_ORDER:
+                    if table_name not in inventory.tables:
+                        continue
+                    source_table = Table(
+                        table_name,
+                        source_metadata,
+                        autoload_with=source_connection,
+                    )
+                    target_table = Table(
+                        table_name,
+                        target_metadata,
+                        schema="public",
+                        autoload_with=target_connection,
+                    )
+                    target_columns = set(target_table.c.keys())
+                    result = inventory.tables[table_name]
 
-                for rows in _iter_batches(
-                    source_connection,
-                    source_table,
-                    batch_size,
-                ):
-                    prepared = []
-                    for row in rows:
-                        cleaned = {
-                            key: value
-                            for key, value in row.items()
-                            if key in target_columns
-                        }
-                        if table_name == "media_assets" and storage is not None:
-                            cleaned = _prepare_media_row(cleaned, storage=storage)
-                        prepared.append(cleaned)
+                    for rows in _iter_batches(
+                        source_connection,
+                        source_table,
+                        batch_size,
+                    ):
+                        prepared = []
+                        for row in rows:
+                            cleaned = {
+                                key: value
+                                for key, value in row.items()
+                                if key in target_columns
+                            }
+                            if table_name == "media_assets" and storage is not None:
+                                cleaned = _prepare_media_row(
+                                    cleaned,
+                                    storage=storage,
+                                    created_uploads=created_media_uploads,
+                                )
+                            prepared.append(cleaned)
 
-                    statement = (
-                        postgres_insert(target_table)
-                        .values(prepared)
-                        .on_conflict_do_nothing(index_elements=[target_table.c.id])
-                    )
-                    insert_result = target_connection.execute(statement)
-                    result.inserted_rows += int(insert_result.rowcount or 0)
-                    source_ids = [int(row["id"]) for row in prepared]
-                    result.verified_source_ids += _verify_ids(
-                        target_connection,
-                        target_table,
-                        source_ids,
-                    )
+                        statement = (
+                            postgres_insert(target_table)
+                            .values(prepared)
+                            .on_conflict_do_nothing(
+                                index_elements=[target_table.c.id]
+                            )
+                        )
+                        insert_result = target_connection.execute(statement)
+                        result.inserted_rows += int(insert_result.rowcount or 0)
+                        source_ids = [int(row["id"]) for row in prepared]
+                        result.verified_source_ids += _verify_ids(
+                            target_connection,
+                            target_table,
+                            source_ids,
+                        )
 
-                _reset_identity(target_connection, table_name)
-                result.target_rows = int(
-                    target_connection.scalar(
-                        select(func.count()).select_from(target_table)
+                    _reset_identity(target_connection, table_name)
+                    result.target_rows = int(
+                        target_connection.scalar(
+                            select(func.count()).select_from(target_table)
+                        )
+                        or 0
                     )
-                    or 0
-                )
-                if result.verified_source_ids != result.source_rows:
-                    raise MigrationError(
-                        f"Target verification failed for table {table_name}"
-                    )
+                    if result.verified_source_ids != result.source_rows:
+                        raise MigrationError(
+                            f"Target verification failed for table {table_name}"
+                        )
+        except Exception:
+            compensation_failed = False
+            if storage is not None:
+                for stored in reversed(created_media_uploads):
+                    try:
+                        storage.delete(stored)
+                    except StorageError:
+                        compensation_failed = True
+            if compensation_failed:
+                raise MigrationError(
+                    "Migration failed and media upload compensation is incomplete"
+                ) from None
+            raise
         inventory.target_backend = "postgresql"
         inventory.completed = True
         return inventory
@@ -402,6 +493,11 @@ def _render_markdown(report: MigrationReport) -> str:
         f"- Completed: `{'yes' if report.completed else 'no'}`",
         f"- Local media: `{report.local_media_rows}` rows / `{report.media_bytes}` bytes",
         f"- Missing media files: `{report.missing_media_files}`",
+        (
+            f"- Artifacts: `{report.artifact_rows}` rows / "
+            f"`{report.artifact_objects}` objects / `{report.artifact_bytes}` bytes"
+        ),
+        f"- Invalid artifact metadata: `{report.invalid_artifact_rows}`",
         f"- Foreign-key orphans: `{sum(report.orphan_foreign_keys.values())}`",
         "",
         "| Table | Source | Inserted | Target | Verified IDs |",
@@ -422,6 +518,7 @@ def _render_markdown(report: MigrationReport) -> str:
             f"- Publish job statuses: `{json.dumps(report.publish_job_statuses)}`",
             f"- Affiliate events: `{json.dumps(report.affiliate_event_counts)}`",
             f"- Commission by currency: `{json.dumps(report.commission_by_currency)}`",
+            f"- Artifacts by kind: `{json.dumps(report.artifacts_by_kind)}`",
             "",
         ]
     )

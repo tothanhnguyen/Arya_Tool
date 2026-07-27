@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import Numeric, create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -206,7 +207,7 @@ def test_affiliate_event_round_trip_and_schema(session: Session) -> None:
     event = AffiliateEvent(
         user_id=1,
         event_type="commission",
-        amount=25_000,
+        amount=Decimal("25000.123456"),
         currency="VND",
         source="manual",
         external_event_id="order-1",
@@ -215,7 +216,21 @@ def test_affiliate_event_round_trip_and_schema(session: Session) -> None:
     session.commit()
 
     assert event.id is not None
-    assert event.amount == 25_000
+    assert event.amount == Decimal("25000.123456")
+    amount_type = AffiliateEvent.__table__.c.amount.type
+    assert isinstance(amount_type, Numeric)
+    assert amount_type.precision == 18
+    assert amount_type.scale == 6
+    owner_constraint = next(
+        constraint
+        for constraint in AffiliateEvent.__table__.constraints
+        if constraint.name == "uq_affiliate_event_owner_source_external"
+    )
+    assert tuple(owner_constraint.columns.keys()) == (
+        "user_id",
+        "source",
+        "external_event_id",
+    )
 
     parsed = AffiliateEventCreate(
         user_id=1,
@@ -223,6 +238,7 @@ def test_affiliate_event_round_trip_and_schema(session: Session) -> None:
         occurred_at=datetime.now(UTC),
     )
     assert parsed.event_type.value == "click"
+    assert parsed.amount == Decimal(0)
 
     with pytest.raises(ValidationError):
         AffiliateEventCreate(
@@ -231,6 +247,50 @@ def test_affiliate_event_round_trip_and_schema(session: Session) -> None:
             amount=0,
             occurred_at=datetime.now(UTC),
         )
+
+    for invalid_amount in ("1000000000000", "0.0000001", "NaN", "Infinity"):
+        with pytest.raises(ValidationError):
+            AffiliateEventCreate(
+                user_id=1,
+                event_type="commission",
+                amount=invalid_amount,
+                occurred_at=datetime.now(UTC),
+            )
+
+
+def test_affiliate_event_external_id_is_unique_within_owner(session: Session) -> None:
+    session.add(User(id=2))
+    session.commit()
+    session.add_all(
+        [
+            AffiliateEvent(
+                user_id=1,
+                event_type="click",
+                source="network-a",
+                external_event_id="shared-id",
+            ),
+            AffiliateEvent(
+                user_id=2,
+                event_type="click",
+                source="network-a",
+                external_event_id="shared-id",
+            ),
+        ]
+    )
+    session.commit()
+
+    assert session.query(AffiliateEvent).count() == 2
+
+    session.add(
+        AffiliateEvent(
+            user_id=1,
+            event_type="click",
+            source="network-a",
+            external_event_id="shared-id",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
 
 
 def test_social_account_schema_validates_limits_and_enums() -> None:

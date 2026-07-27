@@ -23,6 +23,19 @@ def client(session):
         yield test_client
 
 
+def _client_with_owner(user_id: object) -> TestClient:
+    from laplace.web.app import create_app
+
+    app = create_app()
+
+    @app.middleware("http")
+    async def _set_owner(request, call_next):
+        request.state.user_id = user_id
+        return await call_next(request)
+
+    return TestClient(app, follow_redirects=False)
+
+
 def _seed_affiliate_events(session) -> None:
     user = User()
     session.add(user)
@@ -150,3 +163,58 @@ def test_stats_empty_db(client):
     assert "Lượt xem" in response.text
     assert "Lượt bấm" in response.text
     assert "Hoa hồng / click" in response.text
+
+
+def test_stats_without_owner_fails_closed_for_multiple_users(session, client):
+    _seed_affiliate_events(session)
+    session.add(User())
+    session.commit()
+
+    response = client.get("/stats")
+
+    assert response.status_code == 403
+    assert "nhiều user" in response.text
+    assert "Review sản phẩm A" not in response.text
+    assert "50,000 ₫" not in response.text
+
+
+def test_stats_authenticated_owner_is_scoped_in_multi_user_database(session):
+    _seed_affiliate_events(session)
+    selected_owner = User()
+    session.add(selected_owner)
+    session.flush()
+    selected_owner_id = selected_owner.id
+    session.add(
+        AffiliateEvent(
+            user_id=selected_owner_id,
+            event_type="commission",
+            amount=777_777,
+            currency="VND",
+            occurred_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+
+    with _client_with_owner(selected_owner_id) as owner_client:
+        response = owner_client.get("/stats")
+
+    assert response.status_code == 200
+    assert f"Owner #{selected_owner_id}" in response.text
+    assert "777,777 ₫" in response.text
+    assert "Review sản phẩm A" not in response.text
+    assert "50,000 ₫" not in response.text
+
+
+@pytest.mark.parametrize("owner_context", [0, "1", True, 999_999])
+def test_stats_rejects_malformed_or_stale_owner_context(
+    session,
+    owner_context,
+):
+    _seed_affiliate_events(session)
+
+    with _client_with_owner(owner_context) as owner_client:
+        response = owner_client.get("/stats")
+
+    assert response.status_code == 403
+    assert "owner context" in response.text
+    assert "Review sản phẩm A" not in response.text

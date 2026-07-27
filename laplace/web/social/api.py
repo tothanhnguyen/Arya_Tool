@@ -333,40 +333,48 @@ def record_affiliate_event(body: AffiliateEventCreate) -> dict:
             status_code=409,
             detail=f"Dashboard hiện dùng tiền tệ {get_settings().social_currency.upper()}",
         )
-    with session_scope() as session:
-        _validate_event_ownership(session, body)
-        if body.external_event_id is not None:
-            existing = session.scalar(
-                select(AffiliateEvent.id).where(
-                    AffiliateEvent.source == body.source,
-                    AffiliateEvent.external_event_id == body.external_event_id,
+    try:
+        with session_scope() as session:
+            _validate_event_ownership(session, body)
+            if body.external_event_id is not None:
+                existing = session.scalar(
+                    select(AffiliateEvent.id).where(
+                        AffiliateEvent.user_id == body.user_id,
+                        AffiliateEvent.source == body.source,
+                        AffiliateEvent.external_event_id == body.external_event_id,
+                    )
                 )
+                if existing is not None:
+                    raise HTTPException(status_code=409, detail="Event đã được ghi nhận")
+            event = AffiliateEvent(
+                user_id=body.user_id,
+                social_post_id=body.social_post_id,
+                affiliate_product_id=body.affiliate_product_id,
+                social_account_id=body.social_account_id,
+                publish_job_id=body.publish_job_id,
+                event_type=body.event_type.value,
+                amount=body.amount,
+                currency=body.currency,
+                source=body.source,
+                external_event_id=body.external_event_id,
+                metadata_json=body.metadata_json,
+                occurred_at=body.occurred_at,
             )
-            if existing is not None:
-                raise HTTPException(status_code=409, detail="Event đã được ghi nhận")
-        event = AffiliateEvent(
-            user_id=body.user_id,
-            social_post_id=body.social_post_id,
-            affiliate_product_id=body.affiliate_product_id,
-            social_account_id=body.social_account_id,
-            publish_job_id=body.publish_job_id,
-            event_type=body.event_type.value,
-            amount=body.amount,
-            currency=body.currency,
-            source=body.source,
-            external_event_id=body.external_event_id,
-            metadata_json=body.metadata_json,
-            occurred_at=body.occurred_at,
-        )
-        session.add(event)
-        session.flush()
-        return {
-            "id": event.id,
-            "event_type": event.event_type,
-            "amount": event.amount,
-            "currency": event.currency,
-            "occurred_at": event.occurred_at,
-        }
+            session.add(event)
+            session.flush()
+            response = {
+                "id": event.id,
+                "event_type": event.event_type,
+                "amount": event.amount,
+                "currency": event.currency,
+                "occurred_at": event.occurred_at,
+            }
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Event đã được ghi nhận hoặc xung đột.",
+        ) from exc
+    return response
 
 
 @router.post("/content/drafts", status_code=status.HTTP_201_CREATED)
