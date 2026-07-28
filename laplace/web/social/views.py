@@ -10,7 +10,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from starlette.datastructures import UploadFile
 
 from laplace.config import get_settings
@@ -41,6 +41,7 @@ from laplace.web.social.api import (
     MockAccountIn,
     ScheduleIn,
     UserActionIn,
+    request_owner_id,
 )
 from laplace.web.social.api import cancel_job as cancel_job_api
 from laplace.web.social.api import create_affiliate_product as create_product_api
@@ -95,6 +96,17 @@ def _positive_int(value: object, label: str) -> int:
     if parsed <= 0:
         raise HTTPException(status_code=400, detail=f"{label} phải là số nguyên dương.")
     return parsed
+
+
+def _form_owner_id(request: Request, form: object) -> int:
+    raw_user_id = str(form.get("user_id", "")).strip()  # type: ignore[union-attr]
+    supplied_user_id = (
+        _positive_int(raw_user_id, "Workspace user") if raw_user_id else None
+    )
+    owner_id = request_owner_id(request, supplied_user_id)
+    if owner_id is None:
+        raise HTTPException(status_code=400, detail="Workspace user là bắt buộc.")
+    return owner_id
 
 
 def _public_text(value: object, label: str, max_length: int) -> str:
@@ -168,68 +180,93 @@ def get_content_generation_service() -> ContentGenerationService:
 
 def _content_context(
     *,
+    owner_id: int | None = None,
     generated_post_id: int | None = None,
     error: str | None = None,
     form_values: dict[str, str] | None = None,
     notice: str | None = None,
 ) -> dict[str, object]:
+    posts_statement = (
+        select(
+            SocialPost.id,
+            SocialPost.user_id,
+            SocialPost.title,
+            SocialPost.caption,
+            SocialPost.hashtags_json,
+            SocialPost.status,
+            SocialPost.updated_at,
+            MediaAsset.original_name.label("media_name"),
+            MediaAsset.type.label("media_type"),
+            AffiliateProduct.product_name,
+            AffiliateProduct.network,
+            ContentGeneration.style_id,
+            ContentGeneration.model.label("generation_model"),
+            ContentGeneration.quality_json,
+        )
+        .join(MediaAsset, SocialPost.media_asset_id == MediaAsset.id)
+        .outerjoin(
+            AffiliateProduct,
+            SocialPost.affiliate_product_id == AffiliateProduct.id,
+        )
+        .outerjoin(
+            ContentGeneration,
+            ContentGeneration.social_post_id == SocialPost.id,
+        )
+    )
+    users_statement = select(User.id)
+    media_statement = select(
+        MediaAsset.id,
+        MediaAsset.user_id,
+        MediaAsset.original_name,
+        MediaAsset.type,
+    )
+    products_statement = select(
+        AffiliateProduct.id,
+        AffiliateProduct.user_id,
+        AffiliateProduct.product_name,
+        AffiliateProduct.merchant,
+        AffiliateProduct.network,
+    ).where(AffiliateProduct.status == "active")
+    if owner_id is not None:
+        posts_statement = posts_statement.where(
+            SocialPost.user_id == owner_id,
+            MediaAsset.user_id == owner_id,
+            or_(
+                AffiliateProduct.id.is_(None),
+                AffiliateProduct.user_id == owner_id,
+            ),
+        )
+        users_statement = users_statement.where(User.id == owner_id)
+        media_statement = media_statement.where(MediaAsset.user_id == owner_id)
+        products_statement = products_statement.where(
+            AffiliateProduct.user_id == owner_id
+        )
     with session_scope() as session:
         rows = session.execute(
-            select(
-                SocialPost.id,
-                SocialPost.user_id,
-                SocialPost.title,
-                SocialPost.caption,
-                SocialPost.hashtags_json,
-                SocialPost.status,
-                SocialPost.updated_at,
-                MediaAsset.original_name.label("media_name"),
-                MediaAsset.type.label("media_type"),
-                AffiliateProduct.product_name,
-                AffiliateProduct.network,
-                ContentGeneration.style_id,
-                ContentGeneration.model.label("generation_model"),
-                ContentGeneration.quality_json,
-            )
-            .join(MediaAsset, SocialPost.media_asset_id == MediaAsset.id)
-            .outerjoin(
-                AffiliateProduct,
-                SocialPost.affiliate_product_id == AffiliateProduct.id,
-            )
-            .outerjoin(
-                ContentGeneration,
-                ContentGeneration.social_post_id == SocialPost.id,
-            )
+            posts_statement
             .order_by(SocialPost.updated_at.desc(), SocialPost.id.desc())
         ).mappings().all()
         posts = [dict(row) for row in rows]
         users = [
             {"id": row.id, "label": f"User #{row.id}"}
-            for row in session.execute(select(User.id).order_by(User.id)).all()
+            for row in session.execute(users_statement.order_by(User.id)).all()
         ]
         media_assets = [
             dict(row)
             for row in session.execute(
-                select(
-                    MediaAsset.id,
-                    MediaAsset.user_id,
-                    MediaAsset.original_name,
-                    MediaAsset.type,
-                ).order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc())
+                media_statement.order_by(
+                    MediaAsset.created_at.desc(),
+                    MediaAsset.id.desc(),
+                )
             ).mappings()
         ]
         products = [
             dict(row)
             for row in session.execute(
-                select(
-                    AffiliateProduct.id,
-                    AffiliateProduct.user_id,
+                products_statement.order_by(
                     AffiliateProduct.product_name,
-                    AffiliateProduct.merchant,
-                    AffiliateProduct.network,
+                    AffiliateProduct.id,
                 )
-                .where(AffiliateProduct.status == "active")
-                .order_by(AffiliateProduct.product_name, AffiliateProduct.id)
             ).mappings()
         ]
 
@@ -256,28 +293,36 @@ def _content_context(
 
 def _accounts_context(
     *,
+    owner_id: int | None = None,
     error: str | None = None,
     form_values: dict[str, str] | None = None,
     notice: str | None = None,
 ) -> dict[str, object]:
+    accounts_statement = select(
+        SocialAccount.id,
+        SocialAccount.user_id,
+        SocialAccount.display_name,
+        SocialAccount.platform,
+        SocialAccount.auth_type,
+        SocialAccount.status,
+        SocialAccount.daily_post_limit,
+        SocialAccount.timezone,
+        SocialAccount.last_checked_at,
+    )
+    users_statement = select(User.id)
+    if owner_id is not None:
+        accounts_statement = accounts_statement.where(
+            SocialAccount.user_id == owner_id
+        )
+        users_statement = users_statement.where(User.id == owner_id)
     with session_scope() as session:
         rows = session.execute(
-            select(
-                SocialAccount.id,
-                SocialAccount.user_id,
-                SocialAccount.display_name,
-                SocialAccount.platform,
-                SocialAccount.auth_type,
-                SocialAccount.status,
-                SocialAccount.daily_post_limit,
-                SocialAccount.timezone,
-                SocialAccount.last_checked_at,
-            ).order_by(SocialAccount.display_name, SocialAccount.id)
+            accounts_statement.order_by(SocialAccount.display_name, SocialAccount.id)
         ).mappings().all()
         accounts = [dict(row) for row in rows]
         users = [
             {"id": row.id, "label": f"User #{row.id}"}
-            for row in session.execute(select(User.id).order_by(User.id)).all()
+            for row in session.execute(users_statement.order_by(User.id)).all()
         ]
     return _page_context(
         "accounts",
@@ -292,57 +337,75 @@ def _accounts_context(
 
 def _calendar_context(
     *,
+    owner_id: int | None = None,
     error: str | None = None,
     form_values: dict[str, str] | None = None,
     notice: str | None = None,
 ) -> dict[str, object]:
+    jobs_statement = (
+        select(
+            PublishJob.id,
+            PublishJob.status,
+            PublishJob.scheduled_at,
+            PublishJob.attempt_count,
+            SocialPost.user_id,
+            SocialPost.title.label("post_title"),
+            SocialAccount.display_name.label("account_name"),
+            SocialAccount.platform,
+        )
+        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+        .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
+    )
+    posts_statement = select(
+        SocialPost.id,
+        SocialPost.user_id,
+        SocialPost.title,
+        SocialPost.status,
+    ).where(SocialPost.status.in_(("approved", "published")))
+    accounts_statement = select(
+        SocialAccount.id,
+        SocialAccount.user_id,
+        SocialAccount.display_name,
+        SocialAccount.platform,
+    ).where(SocialAccount.status == "active")
+    users_statement = select(User.id)
+    if owner_id is not None:
+        jobs_statement = jobs_statement.where(
+            SocialPost.user_id == owner_id,
+            SocialAccount.user_id == owner_id,
+        )
+        posts_statement = posts_statement.where(SocialPost.user_id == owner_id)
+        accounts_statement = accounts_statement.where(
+            SocialAccount.user_id == owner_id
+        )
+        users_statement = users_statement.where(User.id == owner_id)
     with session_scope() as session:
         rows = session.execute(
-            select(
-                PublishJob.id,
-                PublishJob.status,
-                PublishJob.scheduled_at,
-                PublishJob.attempt_count,
-                SocialPost.user_id,
-                SocialPost.title.label("post_title"),
-                SocialAccount.display_name.label("account_name"),
-                SocialAccount.platform,
-            )
-            .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
-            .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
-            .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
-            .order_by(PublishJob.scheduled_at, PublishJob.id)
+            jobs_statement.order_by(PublishJob.scheduled_at, PublishJob.id)
         ).mappings().all()
         jobs = [dict(row) for row in rows]
         posts = [
             dict(row)
             for row in session.execute(
-                select(
-                    SocialPost.id,
-                    SocialPost.user_id,
-                    SocialPost.title,
-                    SocialPost.status,
+                posts_statement.order_by(
+                    SocialPost.updated_at.desc(),
+                    SocialPost.id.desc(),
                 )
-                .where(SocialPost.status.in_(("approved", "published")))
-                .order_by(SocialPost.updated_at.desc(), SocialPost.id.desc())
             ).mappings()
         ]
         accounts = [
             dict(row)
             for row in session.execute(
-                select(
-                    SocialAccount.id,
-                    SocialAccount.user_id,
+                accounts_statement.order_by(
                     SocialAccount.display_name,
-                    SocialAccount.platform,
+                    SocialAccount.id,
                 )
-                .where(SocialAccount.status == "active")
-                .order_by(SocialAccount.display_name, SocialAccount.id)
             ).mappings()
         ]
         users = [
             {"id": row.id, "label": f"User #{row.id}"}
-            for row in session.execute(select(User.id).order_by(User.id)).all()
+            for row in session.execute(users_statement.order_by(User.id)).all()
         ]
     return _page_context(
         "calendar",
@@ -360,6 +423,7 @@ def _calendar_context(
 
 def _jobs_context(
     *,
+    owner_id: int | None = None,
     status_filter: str | None = None,
     error: str | None = None,
     notice: str | None = None,
@@ -383,6 +447,11 @@ def _jobs_context(
     )
     if status_filter:
         statement = statement.where(PublishJob.status == status_filter)
+    if owner_id is not None:
+        statement = statement.where(
+            SocialPost.user_id == owner_id,
+            SocialAccount.user_id == owner_id,
+        )
     with session_scope() as session:
         rows = session.execute(statement).mappings().all()
         jobs = [dict(row) for row in rows]
@@ -400,23 +469,39 @@ def _jobs_context(
 @router.get("/", response_class=HTMLResponse, name="social_overview")
 def social_overview(request: Request) -> HTMLResponse:
     """Render aggregate counts without exposing account credentials."""
+    owner_id = request_owner_id(request, None)
+    account_statement = select(func.count()).select_from(SocialAccount)
+    content_statement = select(func.count()).select_from(SocialPost)
+    scheduled_statement = (
+        select(func.count())
+        .select_from(PublishJob)
+        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+        .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
+    )
+    failed_statement = (
+        select(func.count())
+        .select_from(PublishJob)
+        .join(SocialPost, PublishJob.social_post_id == SocialPost.id)
+        .join(SocialAccount, PublishJob.social_account_id == SocialAccount.id)
+        .where(PublishJob.status == "failed")
+    )
+    if owner_id is not None:
+        account_statement = account_statement.where(SocialAccount.user_id == owner_id)
+        content_statement = content_statement.where(SocialPost.user_id == owner_id)
+        scheduled_statement = scheduled_statement.where(
+            SocialPost.user_id == owner_id,
+            SocialAccount.user_id == owner_id,
+        )
+        failed_statement = failed_statement.where(
+            SocialPost.user_id == owner_id,
+            SocialAccount.user_id == owner_id,
+        )
     with session_scope() as session:
-        account_count = session.scalar(select(func.count()).select_from(SocialAccount)) or 0
-        content_count = session.scalar(select(func.count()).select_from(SocialPost)) or 0
-        scheduled_count = (
-            session.scalar(
-                select(func.count())
-                .select_from(PublishJob)
-                .where(PublishJob.status.in_(_SCHEDULED_STATUSES))
-            )
-            or 0
-        )
-        failed_count = (
-            session.scalar(
-                select(func.count()).select_from(PublishJob).where(PublishJob.status == "failed")
-            )
-            or 0
-        )
+        account_count = session.scalar(account_statement) or 0
+        content_count = session.scalar(content_statement) or 0
+        scheduled_count = session.scalar(scheduled_statement) or 0
+        failed_count = session.scalar(failed_statement) or 0
 
     summary_cards = (
         {
@@ -461,6 +546,7 @@ def social_accounts(
         request,
         "social_accounts.html",
         _accounts_context(
+            owner_id=request_owner_id(request, None),
             notice="Đã tạo mock account." if created else None,
         ),
     )
@@ -473,6 +559,7 @@ def social_accounts(
 )
 async def create_mock_account(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     form_values = _form_values(
         form,
         "user_id",
@@ -483,12 +570,12 @@ async def create_mock_account(request: Request):
     try:
         _verify_csrf(form)
         body = MockAccountIn(
-            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            user_id=_form_owner_id(request, form),
             platform=_public_text(form.get("platform"), "Platform", 32),
             display_name=_public_text(form.get("display_name"), "Tên hiển thị", 200),
             external_id=_public_text(form.get("external_id"), "External ID", 255),
         )
-        create_mock_account_api(body)
+        create_mock_account_api(request, body)
     except HTTPException as exc:
         if exc.status_code == 403:
             raise
@@ -496,7 +583,11 @@ async def create_mock_account(request: Request):
         return templates.TemplateResponse(
             request,
             "social_accounts.html",
-            _accounts_context(error=error, form_values=form_values),
+            _accounts_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -504,7 +595,11 @@ async def create_mock_account(request: Request):
         return templates.TemplateResponse(
             request,
             "social_accounts.html",
-            _accounts_context(error=error, form_values=form_values),
+            _accounts_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/accounts?created=true", status_code=303)
@@ -527,6 +622,7 @@ def social_content(
         request,
         "social_content.html",
         _content_context(
+            owner_id=request_owner_id(request, None),
             generated_post_id=generated,
             notice=notice_by_action.get(created or ""),
         ),
@@ -540,14 +636,15 @@ def social_content(
 )
 async def upload_social_media(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     form_values = _form_values(form, "user_id")
     try:
         _verify_csrf(form)
-        user_id = _positive_int(form.get("user_id"), "Workspace user")
+        user_id = _form_owner_id(request, form)
         file = form.get("file")
         if not isinstance(file, UploadFile):
             raise HTTPException(status_code=400, detail="Cần chọn file media.")
-        await upload_media_api(user_id=user_id, file=file)
+        await upload_media_api(request=request, user_id=user_id, file=file)
     except HTTPException as exc:
         if exc.status_code == 403:
             raise
@@ -555,7 +652,11 @@ async def upload_social_media(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -563,7 +664,11 @@ async def upload_social_media(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/content?created=media", status_code=303)
@@ -576,6 +681,7 @@ async def upload_social_media(request: Request):
 )
 async def create_affiliate_product(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     names = (
         "user_id",
         "network",
@@ -588,14 +694,14 @@ async def create_affiliate_product(request: Request):
     try:
         _verify_csrf(form)
         body = AffiliateProductIn(
-            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            user_id=_form_owner_id(request, form),
             network=_public_text(form.get("network"), "Affiliate network", 64),
             merchant=_public_text(form.get("merchant"), "Merchant", 200),
             product_name=_public_text(form.get("product_name"), "Tên sản phẩm", 500),
             product_url=_public_text(form.get("product_url"), "Product URL", 2_000),
             affiliate_url=_public_text(form.get("affiliate_url"), "Affiliate URL", 2_000),
         )
-        create_product_api(body)
+        create_product_api(request, body)
     except HTTPException as exc:
         if exc.status_code == 403:
             raise
@@ -603,7 +709,11 @@ async def create_affiliate_product(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -611,7 +721,11 @@ async def create_affiliate_product(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/content?created=product", status_code=303)
@@ -624,6 +738,7 @@ async def create_affiliate_product(request: Request):
 )
 async def create_social_draft(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     names = (
         "user_id",
         "title",
@@ -636,7 +751,7 @@ async def create_social_draft(request: Request):
     try:
         _verify_csrf(form)
         body = DraftIn(
-            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            user_id=_form_owner_id(request, form),
             title=_public_text(form.get("title"), "Tiêu đề", 300),
             caption=_public_text(form.get("caption"), "Caption", 10_000),
             hashtags=_hashtags(form.get("hashtags")),
@@ -646,7 +761,7 @@ async def create_social_draft(request: Request):
                 "Affiliate product",
             ),
         )
-        create_draft_api(body)
+        create_draft_api(request, body)
     except HTTPException as exc:
         if exc.status_code == 403:
             raise
@@ -654,7 +769,11 @@ async def create_social_draft(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -662,7 +781,11 @@ async def create_social_draft(request: Request):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error=error, form_values=form_values),
+            _content_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/content?created=draft", status_code=303)
@@ -675,17 +798,21 @@ async def create_social_draft(request: Request):
 )
 async def generate_social_content(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     if not secrets.compare_digest(str(form.get("csrf", "")), CSRF_TOKEN):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error="CSRF token sai hoặc thiếu."),
+            _content_context(
+                owner_id=owner_id,
+                error="CSRF token sai hoặc thiếu.",
+            ),
             status_code=403,
         )
     form_values = {key: str(value) for key, value in form.items() if key != "csrf"}
     try:
         body = GenerateDraftRequest(
-            user_id=int(str(form.get("user_id", "0"))),
+            user_id=_form_owner_id(request, form),
             media_asset_id=int(str(form.get("media_asset_id", "0"))),
             affiliate_product_id=int(str(form.get("affiliate_product_id", "0"))),
             style_id=str(form.get("style_id", "")),
@@ -697,11 +824,25 @@ async def generate_social_content(request: Request):
             get_content_generation_service().generate_draft,
             body,
         )
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
+        return templates.TemplateResponse(
+            request,
+            "social_content.html",
+            _content_context(
+                owner_id=owner_id,
+                error="Dữ liệu tạo draft chưa hợp lệ.",
+                form_values=form_values,
+            ),
+            status_code=400,
+        )
     except MissingAPIKeyError:
         return templates.TemplateResponse(
             request,
             "social_content.html",
             _content_context(
+                owner_id=owner_id,
                 error="Copywriter chưa được cấu hình; chưa tạo draft.",
                 form_values=form_values,
             ),
@@ -712,6 +853,7 @@ async def generate_social_content(request: Request):
             request,
             "social_content.html",
             _content_context(
+                owner_id=owner_id,
                 error="Dữ liệu tạo draft chưa hợp lệ.",
                 form_values=form_values,
             ),
@@ -722,6 +864,7 @@ async def generate_social_content(request: Request):
             request,
             "social_content.html",
             _content_context(
+                owner_id=owner_id,
                 error="OpenRouter tạm thời không khả dụng; chưa tạo draft.",
                 form_values=form_values,
             ),
@@ -739,20 +882,29 @@ async def generate_social_content(request: Request):
 )
 async def approve_social_content(request: Request, post_id: int):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     if not secrets.compare_digest(str(form.get("csrf", "")), CSRF_TOKEN):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error="CSRF token sai hoặc thiếu."),
+            _content_context(
+                owner_id=owner_id,
+                error="CSRF token sai hoặc thiếu.",
+            ),
             status_code=403,
         )
     try:
-        user_id = _positive_int(form.get("user_id"), "Workspace user")
-    except HTTPException:
+        user_id = _form_owner_id(request, form)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error="Dữ liệu form chưa hợp lệ."),
+            _content_context(
+                owner_id=owner_id,
+                error="Dữ liệu form chưa hợp lệ.",
+            ),
             status_code=400,
         )
     result = run_social_content(
@@ -763,7 +915,10 @@ async def approve_social_content(request: Request, post_id: int):
         return templates.TemplateResponse(
             request,
             "social_content.html",
-            _content_context(error="Không thể duyệt draft ở trạng thái hiện tại."),
+            _content_context(
+                owner_id=owner_id,
+                error="Không thể duyệt draft ở trạng thái hiện tại.",
+            ),
             status_code=409,
         )
     return RedirectResponse(url="/social/content?created=approved", status_code=303)
@@ -782,7 +937,10 @@ def social_calendar(
     return templates.TemplateResponse(
         request,
         "social_calendar.html",
-        _calendar_context(notice=notice_by_action.get(changed or "")),
+        _calendar_context(
+            owner_id=request_owner_id(request, None),
+            notice=notice_by_action.get(changed or ""),
+        ),
     )
 
 
@@ -793,12 +951,13 @@ def social_calendar(
 )
 async def schedule_social_content(request: Request):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     names = ("user_id", "social_post_id", "social_account_id", "scheduled_at")
     form_values = _form_values(form, *names)
     try:
         _verify_csrf(form)
         body = ScheduleIn(
-            user_id=_positive_int(form.get("user_id"), "Workspace user"),
+            user_id=_form_owner_id(request, form),
             social_post_id=_positive_int(form.get("social_post_id"), "Nội dung"),
             social_account_id=_positive_int(
                 form.get("social_account_id"),
@@ -806,7 +965,7 @@ async def schedule_social_content(request: Request):
             ),
             scheduled_at=_parse_schedule(form.get("scheduled_at")),
         )
-        schedule_content_api(body)
+        schedule_content_api(request, body)
     except HTTPException as exc:
         if exc.status_code == 403:
             raise
@@ -817,7 +976,11 @@ async def schedule_social_content(request: Request):
         return templates.TemplateResponse(
             request,
             "social_calendar.html",
-            _calendar_context(error=error, form_values=form_values),
+            _calendar_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -828,14 +991,18 @@ async def schedule_social_content(request: Request):
         return templates.TemplateResponse(
             request,
             "social_calendar.html",
-            _calendar_context(error=error, form_values=form_values),
+            _calendar_context(
+                owner_id=owner_id,
+                error=error,
+                form_values=form_values,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/calendar?changed=scheduled", status_code=303)
 
 
-def _cancel_publish_job(job_id: int, user_id: int) -> None:
-    cancel_job_api(job_id, UserActionIn(user_id=user_id))
+def _cancel_publish_job(request: Request, job_id: int, user_id: int) -> None:
+    cancel_job_api(request, job_id, UserActionIn(user_id=user_id))
 
 
 @router.post(
@@ -845,11 +1012,13 @@ def _cancel_publish_job(job_id: int, user_id: int) -> None:
 )
 async def cancel_calendar_job(request: Request, job_id: int):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     try:
         _verify_csrf(form)
         _cancel_publish_job(
+            request,
             job_id,
-            _positive_int(form.get("user_id"), "Workspace user"),
+            _form_owner_id(request, form),
         )
     except HTTPException as exc:
         if exc.status_code == 403:
@@ -858,7 +1027,7 @@ async def cancel_calendar_job(request: Request, job_id: int):
         return templates.TemplateResponse(
             request,
             "social_calendar.html",
-            _calendar_context(error=error),
+            _calendar_context(owner_id=owner_id, error=error),
             status_code=status_code,
         )
     except Exception as exc:
@@ -866,7 +1035,7 @@ async def cancel_calendar_job(request: Request, job_id: int):
         return templates.TemplateResponse(
             request,
             "social_calendar.html",
-            _calendar_context(error=error),
+            _calendar_context(owner_id=owner_id, error=error),
             status_code=status_code,
         )
     return RedirectResponse(url="/social/calendar?changed=cancelled", status_code=303)
@@ -883,6 +1052,7 @@ def social_jobs(
         request,
         "social_jobs.html",
         _jobs_context(
+            owner_id=request_owner_id(request, None),
             status_filter=status,
             notice="Đã hủy publish job." if changed == "cancelled" else None,
         ),
@@ -896,14 +1066,16 @@ def social_jobs(
 )
 async def cancel_history_job(request: Request, job_id: int):
     form = await request.form()
+    owner_id = request_owner_id(request, None)
     status_filter = str(form.get("status_filter", "")).strip() or None
     if status_filter and len(status_filter) > 24:
         status_filter = None
     try:
         _verify_csrf(form)
         _cancel_publish_job(
+            request,
             job_id,
-            _positive_int(form.get("user_id"), "Workspace user"),
+            _form_owner_id(request, form),
         )
     except HTTPException as exc:
         if exc.status_code == 403:
@@ -912,7 +1084,11 @@ async def cancel_history_job(request: Request, job_id: int):
         return templates.TemplateResponse(
             request,
             "social_jobs.html",
-            _jobs_context(status_filter=status_filter, error=error),
+            _jobs_context(
+                owner_id=owner_id,
+                status_filter=status_filter,
+                error=error,
+            ),
             status_code=status_code,
         )
     except Exception as exc:
@@ -920,7 +1096,11 @@ async def cancel_history_job(request: Request, job_id: int):
         return templates.TemplateResponse(
             request,
             "social_jobs.html",
-            _jobs_context(status_filter=status_filter, error=error),
+            _jobs_context(
+                owner_id=owner_id,
+                status_filter=status_filter,
+                error=error,
+            ),
             status_code=status_code,
         )
     return RedirectResponse(

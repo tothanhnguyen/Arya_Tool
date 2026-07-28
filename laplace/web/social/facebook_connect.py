@@ -35,6 +35,10 @@ from laplace.social.browser_profile import (
 from laplace.social.models import SocialAccount
 from laplace.web.deps import require_api_key
 from laplace.web.settings_page import CSRF_TOKEN, require_loopback
+from laplace.web.social.api import (
+    request_owner_id,
+    require_authenticated_json_mutation,
+)
 
 _TEMPLATES = Jinja2Templates(
     directory=[
@@ -55,7 +59,11 @@ router = APIRouter(
 api_router = APIRouter(
     prefix="/api/social/facebook",
     tags=["social-facebook"],
-    dependencies=[Depends(require_api_key), Depends(require_loopback)],
+    dependencies=[
+        Depends(require_api_key),
+        Depends(require_loopback),
+        Depends(require_authenticated_json_mutation),
+    ],
 )
 
 
@@ -100,6 +108,15 @@ def _positive_int(value: object, label: str) -> int:
     if parsed <= 0:
         raise HTTPException(status_code=400, detail=f"{label} phải là số nguyên dương.")
     return parsed
+
+
+def _form_owner_id(request: Request, form: object) -> int:
+    raw_user_id = str(form.get("user_id", "")).strip()  # type: ignore[union-attr]
+    supplied_user_id = _positive_int(raw_user_id, "User ID") if raw_user_id else None
+    owner_id = request_owner_id(request, supplied_user_id)
+    if owner_id is None:
+        raise HTTPException(status_code=400, detail="User ID là bắt buộc.")
+    return owner_id
 
 
 def _public_text(value: object, label: str, max_length: int) -> str:
@@ -224,11 +241,10 @@ async def _prepare_account(
                 )
             )
             if existing is not None:
-                if existing.user_id != user_id:
-                    detail = "Facebook external ID đã thuộc một user khác."
-                else:
-                    detail = "Facebook account này đã tồn tại."
-                raise HTTPException(status_code=409, detail=detail)
+                raise HTTPException(
+                    status_code=409,
+                    detail="Facebook account này đã tồn tại.",
+                )
 
             account = SocialAccount(
                 user_id=user_id,
@@ -348,21 +364,31 @@ def connect_page(
     user_id: int | None = Query(default=None, gt=0),
     social_account_id: int | None = Query(default=None, gt=0),
 ) -> HTMLResponse:
+    resolved_user_id = request_owner_id(request, user_id)
     profile = None
     account_data = None
     error = None
-    if user_id is not None or social_account_id is not None:
+    if resolved_user_id is not None or social_account_id is not None:
         try:
-            if user_id is None or social_account_id is None:
+            if resolved_user_id is None or social_account_id is None:
                 raise HTTPException(
                     status_code=400,
                     detail="Thiếu User ID hoặc Social Account ID.",
                 )
             with session_scope() as session:
-                account = _owned_account(session, social_account_id, user_id)
+                account = _owned_account(
+                    session,
+                    social_account_id,
+                    resolved_user_id,
+                )
                 account_data = _public_account(account)
-            profile = manager.status(str(social_account_id), str(user_id))
+            profile = manager.status(str(social_account_id), str(resolved_user_id))
         except HTTPException as exc:
+            if (
+                request_owner_id(request, None) is not None
+                and exc.status_code in {403, 404}
+            ):
+                raise
             error = str(exc.detail)
         except Exception as exc:
             error = _manager_error(exc).detail
@@ -374,7 +400,7 @@ def connect_page(
             profile=profile,
             account=account_data,
             error=error,
-            user_id=user_id or _LOCAL_USER_ID,
+            user_id=resolved_user_id or _LOCAL_USER_ID,
         ),
     )
 
@@ -386,7 +412,7 @@ async def prepare_profile_form(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_form_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     display_name = _public_text(form.get("display_name"), "Tên hiển thị", 200)
     external_id = _public_text(form.get("external_id"), "Facebook external ID", 255)
     info, _ = await _prepare_account(
@@ -394,7 +420,7 @@ async def prepare_profile_form(
         user_id=user_id,
         display_name=display_name,
         external_id=external_id,
-        allow_local_user_create=True,
+        allow_local_user_create=request_owner_id(request, None) is None,
     )
     return _redirect_to_profile(info)
 
@@ -407,7 +433,7 @@ async def launch_login_form(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_form_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     info, _ = await _launch_account(
         manager,
         social_account_id=social_account_id,
@@ -424,7 +450,7 @@ async def mark_ready_form(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_form_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     info, _ = await _ready_account(
         manager,
         social_account_id=social_account_id,
@@ -439,14 +465,17 @@ async def mark_ready_form(
     dependencies=[Depends(_require_csrf_header)],
 )
 async def prepare_profile_api(
+    request: Request,
     body: PrepareProfileIn,
     manager: ProfileManagerDep,
 ) -> dict[str, object]:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     display_name = _public_text(body.display_name, "Tên hiển thị", 200)
     external_id = _public_text(body.external_id, "Facebook external ID", 255)
     info, account = await _prepare_account(
         manager,
-        user_id=body.user_id,
+        user_id=owner_id,
         display_name=display_name,
         external_id=external_id,
     )
@@ -458,14 +487,17 @@ async def prepare_profile_api(
     dependencies=[Depends(_require_csrf_header)],
 )
 async def launch_login_api(
+    request: Request,
     social_account_id: int,
     body: ProfileOwnerIn,
     manager: ProfileManagerDep,
 ) -> dict[str, object]:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     info, account = await _launch_account(
         manager,
         social_account_id=social_account_id,
-        user_id=body.user_id,
+        user_id=owner_id,
     )
     return {**_public_profile(info), **account}
 
@@ -475,29 +507,35 @@ async def launch_login_api(
     dependencies=[Depends(_require_csrf_header)],
 )
 async def mark_ready_api(
+    request: Request,
     social_account_id: int,
     body: ProfileOwnerIn,
     manager: ProfileManagerDep,
 ) -> dict[str, object]:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     info, account = await _ready_account(
         manager,
         social_account_id=social_account_id,
-        user_id=body.user_id,
+        user_id=owner_id,
     )
     return {**_public_profile(info), **account}
 
 
 @api_router.get("/connect/{social_account_id}/status")
 def profile_status_api(
+    request: Request,
     social_account_id: int,
     manager: ProfileManagerDep,
     user_id: int = Query(gt=0),
 ) -> dict[str, object]:
+    owner_id = request_owner_id(request, user_id)
+    assert owner_id is not None
     try:
         with session_scope() as session:
-            account = _owned_account(session, social_account_id, user_id)
+            account = _owned_account(session, social_account_id, owner_id)
             account_data = _public_account(account)
-        info = manager.status(str(social_account_id), str(user_id))
+        info = manager.status(str(social_account_id), str(owner_id))
     except HTTPException:
         raise
     except Exception as exc:

@@ -1,6 +1,17 @@
 from datetime import UTC, datetime
+from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from laplace.db import Base
@@ -14,6 +25,11 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    auth_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        unique=True,
+        nullable=True,
+    )
     tg_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)
     profile_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

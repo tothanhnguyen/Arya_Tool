@@ -6,7 +6,15 @@ from fastapi import FastAPI
 
 from laplace.db import init_db
 from laplace.tools.base import load_builtin_tools
-from laplace.web import api, evalsview, settings_page, statsview, traceview
+from laplace.web import (
+    api,
+    artifacts,
+    evalsview,
+    health,
+    settings_page,
+    statsview,
+    traceview,
+)
 from laplace.web.social import api as social_api
 from laplace.web.social import facebook_connect, instagram_connect
 from laplace.web.social import views as social_views
@@ -20,7 +28,9 @@ def create_app() -> FastAPI:
         yield
 
     app = FastAPI(title="Arya_Tool", lifespan=lifespan)
+    app.include_router(health.router)
     app.include_router(api.router, prefix="/api")
+    app.include_router(artifacts.router)
     app.include_router(traceview.router)
     app.include_router(settings_page.router)
     app.include_router(statsview.router)

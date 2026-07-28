@@ -149,6 +149,37 @@ def test_signed_url_rejects_an_unexpected_origin():
         storage.create_signed_url(stored, user_id=3, expires_in=120)
 
 
+@pytest.mark.parametrize(
+    "project_url",
+    [
+        "http://project.supabase.co",
+        "https://user@example.test",
+        "https://example.test/project-ref",
+        "https://example.test#fragment",
+    ],
+)
+def test_artifact_storage_rejects_unsafe_project_urls(project_url):
+    with pytest.raises(ArtifactError):
+        SupabaseArtifactStorage(
+            project_url=project_url,
+            secret_key="fake",
+            bucket="arya-artifacts",
+        )
+
+
+def test_artifact_storage_allows_loopback_emulator_over_http():
+    storage = SupabaseArtifactStorage(
+        project_url="http://localhost:54321/",
+        secret_key="fake",
+        bucket="arya-artifacts",
+    )
+
+    assert storage._object_url("object", "users/1/value") == (
+        "http://localhost:54321/storage/v1/object/"
+        "arya-artifacts/users/1/value"
+    )
+
+
 def test_storage_validation_and_errors_do_not_expose_secret_or_response():
     secret = "do-not-expose"
 
@@ -216,6 +247,32 @@ def test_persistence_failure_compensates_only_new_uploads():
             )
 
         assert len(storage.deleted) == expected_deletes
+
+
+def test_persistence_failure_can_defer_cleanup_to_avoid_concurrent_data_loss():
+    class FakeStorage:
+        def __init__(self):
+            self.deleted = []
+
+        def upload(self, **_kwargs):
+            return _stored_artifact(created=True)
+
+        def delete(self, stored, *, user_id):
+            self.deleted.append((stored.key, user_id))
+
+    storage = FakeStorage()
+    with pytest.raises(ArtifactPersistenceError):
+        upload_with_compensation(
+            storage,
+            user_id=3,
+            original_name="report.json",
+            payload=b"artifact-payload",
+            content_type="application/json",
+            persist=lambda _stored: (_ for _ in ()).throw(RuntimeError("db")),
+            compensate_new_upload=False,
+        )
+
+    assert storage.deleted == []
 
 
 class _FakeArtifactStorage:

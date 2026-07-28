@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # server-side only and must never be rendered, logged, or sent to an LLM.
     supabase_url: str | None = None
     supabase_secret_key: str | None = None
+    supabase_publishable_key: str | None = None
+    supabase_anon_key: str | None = None
+    supabase_auth_enabled: bool = False
+    supabase_auth_cookie_name: str = "arya_supabase_access_token"
+    supabase_auth_timeout_s: float = 5.0
     supabase_media_bucket: str = "arya-media"
     supabase_artifact_bucket: str = "arya-artifacts"
     supabase_artifact_max_bytes: int = 50 * 1024 * 1024

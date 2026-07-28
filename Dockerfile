@@ -24,11 +24,10 @@ RUN groupadd --system arya \
 
 EXPOSE 8010
 
-# /openapi.json do FastAPI phuc vu san, KHONG bi chan boi LAPLACE_API_KEY
-# -> healthcheck van chay duoc khi API key bat. Dung httpx (da la dependency)
-# vi image slim khong co curl/wget.
+# Liveness chi kiem tra web process, khong bi chan boi API key/Auth va khong
+# phu thuoc DB/Storage/scheduler. Dung httpx vi image slim khong co curl/wget.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["python", "-c", "import httpx, sys; sys.exit(0 if httpx.get('http://localhost:8010/openapi.json', timeout=4).status_code == 200 else 1)"]
+  CMD ["python", "-c", "import httpx, sys; sys.exit(0 if httpx.get('http://localhost:8010/health/live', timeout=4).status_code == 200 else 1)"]
 
 USER arya
 

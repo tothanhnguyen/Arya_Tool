@@ -16,6 +16,49 @@
 | 4 | Affiliate import va analytics | DA XONG - `/root`, 2026-07-28 |
 | 5 | CI test gate va CD container image | DA XONG - `/root`, 2026-07-28 |
 
+## Dot 2 - Auth, Artifact API va van han
+
+| Phase | Task | Owner | Vung file chinh | Trang thai |
+|---|---|---|---|---|
+| A | Supabase Auth session va dashboard owner mapping | agent `dashboard_forms` | `laplace/web/supabase_auth.py`, `laplace/web/deps.py`, `laplace/models.py`, `laplace/db.py`, `laplace/config.py`, test Auth moi | DA XONG - 2026-07-28 |
+| B | Owner-scoped Artifact API/runtime integration | agent `supabase_readiness` | `laplace/web/artifacts.py`, `laplace/services/artifacts.py`, test Artifact API moi | DA XONG - 2026-07-28 |
+| C | S7 health/readiness va backup tooling an toan | agent `quality_audit` | `laplace/ops/`, `laplace/web/health.py`, test Ops/health/backup moi | DA XONG - 2026-07-28 |
+| D1 | Enforce Auth owner tren task/social/connect va CSRF API | agent `dashboard_forms` | task/trace/social/connect web routes va test owner integration | DA XONG - 2026-07-28 |
+| D2 | Tich hop router/config/schema, review va full gate | `/root` | `laplace/web/app.py`, cac file plan va xung dot tich hop | DA XONG - 2026-07-28 |
+
+Ranh gio Dot 2:
+
+- Ca ba phase A/B/C phai test offline bang dependency injection/fake; khong
+  doc hoac sua `.env`, khong goi remote Supabase.
+- Phase A dung publishable/anon key cho user session, khong dung service key;
+  khi Auth bat thi session sai/thieu phai fail closed, khi Auth tat thi giu
+  local fallback ro rang.
+- Phase B lay owner tu authenticated request context, khong tin owner ID trong
+  body/form; upload/download/signed URL/delete/reconcile khong lo secret hoac
+  loi upstream.
+- Phase C tach liveness/readiness; output health khong chua URL, credential,
+  exception text hay object name. Backup SQLite co hash/manifest/no-overwrite;
+  Postgres/Supabase chi lap ke hoach command, khong execute.
+- Agent khong stage/commit. `/root` review, tich hop, chay full gate va commit
+  mot lan sau khi ca ba phase dat gate.
+
+Ket qua Dot 2:
+
+- Dashboard validate Supabase Auth session bang publishable/anon key, map UUID
+  sang owner noi bo va fail closed khi Auth bat; local/API-key fallback van
+  hoat dong khi Auth tat.
+- Task, trace, social dashboard/API va Facebook/Instagram connect da scope theo
+  authenticated owner. JSON mutation dung Bearer; HTML mutation co CSRF hoac
+  same-origin gate.
+- Artifact API private co upload/download/signed URL/delete/reconciliation,
+  validation MIME/size/content va local single-owner fallback. URL Supabase chi
+  cho HTTPS, tru loopback emulator.
+- `/health/live` tach khoi `/health/ready`; readiness kiem DB/schema, Storage,
+  scheduler backlog/retry/lag. SQLite backup co online snapshot, SHA-256,
+  manifest/no-overwrite; Supabase backup helper chi sinh plan, khong execute.
+- Full gate offline: 517 pass, 1 remote Postgres test skip; Ruff va
+  `git diff --check` pass.
+
 Quy uoc trang thai dung chung cho moi bang task:
 
 - `TASK TRONG`: chua co owner; terminal khac duoc phep nhan.

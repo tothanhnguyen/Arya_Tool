@@ -112,6 +112,26 @@ def _upgrade_sqlite_media_columns(engine: Engine) -> None:
                 connection.execute(text(statement))
 
 
+def _upgrade_sqlite_user_auth_column(engine: Engine) -> None:
+    """Add the nullable Supabase Auth owner mapping to legacy SQLite databases."""
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    with engine.begin() as connection:
+        if "auth_user_id" not in columns:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN auth_user_id CHAR(32)")
+            )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_auth_user_id "
+                "ON users (auth_user_id)"
+            )
+        )
+
+
 def _upgrade_sqlite_affiliate_event_integrity(engine: Engine) -> None:
     """Rebuild the legacy leaf table with Decimal money and owner-scoped IDs."""
 
@@ -248,6 +268,7 @@ def check_postgres_schema(engine: Engine) -> SchemaHealth:
     existing = set(inspector.get_table_names(schema="public"))
     missing_tables = tuple(sorted(expected - existing))
     required_columns = {
+        "users": {"auth_user_id"},
         "media_assets": {"storage_backend", "storage_bucket", "storage_key"},
         "artifacts": {
             "user_id",
@@ -337,6 +358,7 @@ def init_db(engine=None) -> None:
     target = engine or get_engine()
     if target.dialect.name == "sqlite":
         Base.metadata.create_all(target)
+        _upgrade_sqlite_user_auth_column(target)
         _upgrade_sqlite_media_columns(target)
         _upgrade_sqlite_affiliate_event_integrity(target)
         return

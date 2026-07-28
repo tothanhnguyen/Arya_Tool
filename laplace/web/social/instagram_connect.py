@@ -31,6 +31,7 @@ from laplace.social.instagram_profile import (
 from laplace.social.models import SocialAccount
 from laplace.web.deps import require_api_key
 from laplace.web.settings_page import CSRF_TOKEN, require_loopback
+from laplace.web.social.api import request_owner_id
 
 _TEMPLATES = Jinja2Templates(
     directory=[
@@ -77,6 +78,15 @@ def _positive_int(value: object, label: str) -> int:
     if parsed <= 0:
         raise HTTPException(status_code=400, detail=f"{label} không hợp lệ.")
     return parsed
+
+
+def _form_owner_id(request: Request, form: object) -> int:
+    raw_user_id = str(form.get("user_id", "")).strip()  # type: ignore[union-attr]
+    supplied_user_id = _positive_int(raw_user_id, "User ID") if raw_user_id else None
+    owner_id = request_owner_id(request, supplied_user_id)
+    if owner_id is None:
+        raise HTTPException(status_code=400, detail="User ID là bắt buộc.")
+    return owner_id
 
 
 def _public_text(value: object, label: str, max_length: int) -> str:
@@ -192,17 +202,23 @@ def connect_page(
     user_id: int | None = Query(default=None, gt=0),
     account_id: int | None = Query(default=None, gt=0),
 ) -> HTMLResponse:
+    resolved_user_id = request_owner_id(request, user_id)
     account = None
     profile = None
     error = None
-    if user_id is not None or account_id is not None:
-        if user_id is None or account_id is None:
+    if resolved_user_id is not None or account_id is not None:
+        if resolved_user_id is None or account_id is None:
             error = "Cần đủ User ID và Account ID để xem trạng thái."
         else:
             try:
-                account = _owned_account(account_id, user_id)
-                profile = manager.status(str(account.id), str(user_id))
+                account = _owned_account(account_id, resolved_user_id)
+                profile = manager.status(str(account.id), str(resolved_user_id))
             except HTTPException as exc:
+                if (
+                    request_owner_id(request, None) is not None
+                    and exc.status_code in {403, 404}
+                ):
+                    raise
                 error = str(exc.detail)
             except Exception as exc:
                 error = str(_manager_error(exc).detail)
@@ -214,7 +230,7 @@ def connect_page(
             account=account,
             profile=profile,
             error=error,
-            user_id=user_id or _LOCAL_USER_ID,
+            user_id=resolved_user_id or _LOCAL_USER_ID,
         ),
     )
 
@@ -226,7 +242,7 @@ async def prepare_account(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     display_name = _public_text(form.get("display_name"), "Tên hiển thị", 200)
     external_id = _public_text(form.get("external_id"), "Instagram ID công khai", 255)
 
@@ -234,7 +250,7 @@ async def prepare_account(
         with session_scope() as session:
             user = session.get(User, user_id)
             if user is None:
-                if user_id == _LOCAL_USER_ID:
+                if request_owner_id(request, None) is None and user_id == _LOCAL_USER_ID:
                     session.add(
                         User(
                             id=_LOCAL_USER_ID,
@@ -283,7 +299,7 @@ async def launch_login(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     account = _owned_account(account_id, user_id)
     try:
         await run_in_threadpool(manager.launch_login, str(account.id), str(user_id))
@@ -300,7 +316,7 @@ async def mark_ready(
 ) -> RedirectResponse:
     form = await request.form()
     _verify_csrf(form)
-    user_id = _positive_int(form.get("user_id"), "User ID")
+    user_id = _form_owner_id(request, form)
     account = _owned_account(account_id, user_id)
     try:
         await run_in_threadpool(manager.mark_ready, str(account.id), str(user_id))

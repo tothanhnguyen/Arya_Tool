@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import select
@@ -41,18 +41,58 @@ from laplace.tools.social_content import SocialContentParams, social_content
 from laplace.tools.social_schedule import SocialScheduleParams, social_schedule
 from laplace.web.deps import require_api_key
 
-router = APIRouter(
-    prefix="/api/social",
-    tags=["social"],
-    dependencies=[Depends(require_api_key)],
-)
-
 _ALLOWED_MEDIA = {
     "image/jpeg": (".jpg", "image"),
     "image/png": (".png", "image"),
     "image/webp": (".webp", "image"),
     "video/mp4": (".mp4", "video"),
 }
+
+
+def request_owner_id(request: Request, supplied_user_id: int | None) -> int | None:
+    """Resolve the authenticated owner and reject caller-controlled overrides."""
+
+    owner_id = getattr(request.state, "user_id", None)
+    authenticated_owner = (
+        owner_id if isinstance(owner_id, int) and owner_id > 0 else None
+    )
+    if (
+        authenticated_owner is not None
+        and supplied_user_id is not None
+        and supplied_user_id != authenticated_owner
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="User ID does not match the authenticated owner.",
+        )
+    return authenticated_owner if authenticated_owner is not None else supplied_user_id
+
+
+def require_authenticated_json_mutation(request: Request) -> None:
+    """Prevent cookie-authenticated API writes from becoming CSRF primitives."""
+
+    if request_owner_id(request, None) is None or request.method in {
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    }:
+        return
+    scheme, separator, credentials = request.headers.get("authorization", "").partition(" ")
+    if not separator or scheme.casefold() != "bearer" or not credentials.strip():
+        raise HTTPException(
+            status_code=403,
+            detail="Authenticated API mutations require a Bearer token.",
+        )
+
+
+router = APIRouter(
+    prefix="/api/social",
+    tags=["social"],
+    dependencies=[
+        Depends(require_api_key),
+        Depends(require_authenticated_json_mutation),
+    ],
+)
 
 
 def _matches_media_signature(content_type: str, payload: bytes) -> bool:
@@ -154,9 +194,11 @@ def _validate_event_ownership(session, body: AffiliateEventCreate) -> None:
 
 
 @router.post("/accounts/mock", status_code=status.HTTP_201_CREATED)
-def create_mock_account(body: MockAccountIn) -> dict:
+def create_mock_account(request: Request, body: MockAccountIn) -> dict:
     """Create a credential-free local account for end-to-end mock testing."""
-    _require_user(body.user_id)
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
+    _require_user(owner_id)
     with session_scope() as session:
         existing = session.scalar(
             select(SocialAccount).where(
@@ -167,7 +209,7 @@ def create_mock_account(body: MockAccountIn) -> dict:
         if existing is not None:
             raise HTTPException(status_code=409, detail="Account đã tồn tại")
         account = SocialAccount(
-            user_id=body.user_id,
+            user_id=owner_id,
             platform=body.platform,
             display_name=body.display_name.strip(),
             external_id=body.external_id.strip(),
@@ -188,8 +230,14 @@ def create_mock_account(body: MockAccountIn) -> dict:
 
 
 @router.post("/media", status_code=status.HTTP_201_CREATED)
-async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dict:
-    _require_user(user_id)
+async def upload_media(
+    request: Request,
+    user_id: int,
+    file: Annotated[UploadFile, File()],
+) -> dict:
+    owner_id = request_owner_id(request, user_id)
+    assert owner_id is not None
+    _require_user(owner_id)
     content_type = (file.content_type or "").lower()
     media_config = _ALLOWED_MEDIA.get(content_type)
     if media_config is None:
@@ -215,7 +263,7 @@ async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dic
     with session_scope() as session:
         existing = session.scalar(
             select(MediaAsset).where(
-                MediaAsset.user_id == user_id,
+                MediaAsset.user_id == owner_id,
                 MediaAsset.sha256 == digest,
             )
         )
@@ -234,7 +282,7 @@ async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dic
         storage = get_media_storage()
         stored = await run_in_threadpool(
             storage.store,
-            user_id=user_id,
+            user_id=owner_id,
             digest=digest,
             suffix=suffix,
             payload=payload,
@@ -248,7 +296,7 @@ async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dic
     try:
         with session_scope() as session:
             asset = MediaAsset(
-                user_id=user_id,
+                user_id=owner_id,
                 type=media_type,
                 local_path=stored.location,
                 storage_backend=stored.backend,
@@ -277,7 +325,7 @@ async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dic
         with session_scope() as session:
             existing = session.scalar(
                 select(MediaAsset).where(
-                    MediaAsset.user_id == user_id,
+                    MediaAsset.user_id == owner_id,
                     MediaAsset.sha256 == digest,
                 )
             )
@@ -302,11 +350,13 @@ async def upload_media(user_id: int, file: Annotated[UploadFile, File()]) -> dic
 
 
 @router.post("/products", status_code=status.HTTP_201_CREATED)
-def create_affiliate_product(body: AffiliateProductIn) -> dict:
-    _require_user(body.user_id)
+def create_affiliate_product(request: Request, body: AffiliateProductIn) -> dict:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
+    _require_user(owner_id)
     with session_scope() as session:
         product = AffiliateProduct(
-            user_id=body.user_id,
+            user_id=owner_id,
             network=body.network.strip(),
             merchant=body.merchant.strip(),
             product_name=body.product_name.strip(),
@@ -325,9 +375,12 @@ def create_affiliate_product(body: AffiliateProductIn) -> dict:
 
 
 @router.post("/events", status_code=status.HTTP_201_CREATED)
-def record_affiliate_event(body: AffiliateEventCreate) -> dict:
+def record_affiliate_event(request: Request, body: AffiliateEventCreate) -> dict:
     """Record normalized view, click or commission data from an approved source."""
-    _require_user(body.user_id)
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
+    _require_user(owner_id)
+    body = body.model_copy(update={"user_id": owner_id})
     if body.currency != get_settings().social_currency.upper():
         raise HTTPException(
             status_code=409,
@@ -378,8 +431,10 @@ def record_affiliate_event(body: AffiliateEventCreate) -> dict:
 
 
 @router.post("/content/drafts", status_code=status.HTTP_201_CREATED)
-def create_draft(body: DraftIn) -> dict:
-    _require_user(body.user_id)
+def create_draft(request: Request, body: DraftIn) -> dict:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
+    _require_user(owner_id)
     return _tool_data(
         social_content(
             SocialContentParams(
@@ -390,7 +445,7 @@ def create_draft(body: DraftIn) -> dict:
                 media_asset_id=body.media_asset_id,
                 affiliate_product_id=body.affiliate_product_id,
             ),
-            ToolContext(user_id=body.user_id),
+            ToolContext(user_id=owner_id),
         )
     )
 
@@ -401,8 +456,14 @@ def list_writing_styles() -> dict:
 
 
 @router.post("/content/generate", status_code=status.HTTP_201_CREATED)
-async def generate_content_draft(body: GenerateDraftRequest) -> dict:
+async def generate_content_draft(
+    request: Request,
+    body: GenerateDraftRequest,
+) -> dict:
     """Generate one validated draft with the dedicated OpenRouter Free writer."""
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
+    body = body.model_copy(update={"user_id": owner_id})
     try:
         generated = await run_in_threadpool(
             get_content_generation_service().generate_draft,
@@ -421,17 +482,21 @@ async def generate_content_draft(body: GenerateDraftRequest) -> dict:
 
 
 @router.post("/content/{post_id}/approve")
-def approve_content(post_id: int, body: UserActionIn) -> dict:
+def approve_content(request: Request, post_id: int, body: UserActionIn) -> dict:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     return _tool_data(
         social_content(
             SocialContentParams(action="approve", post_id=post_id),
-            ToolContext(user_id=body.user_id),
+            ToolContext(user_id=owner_id),
         )
     )
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED)
-def schedule_content(body: ScheduleIn) -> dict:
+def schedule_content(request: Request, body: ScheduleIn) -> dict:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     return _tool_data(
         social_schedule(
             SocialScheduleParams(
@@ -440,16 +505,18 @@ def schedule_content(body: ScheduleIn) -> dict:
                 social_account_id=body.social_account_id,
                 scheduled_at=body.scheduled_at,
             ),
-            ToolContext(user_id=body.user_id),
+            ToolContext(user_id=owner_id),
         )
     )
 
 
 @router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: int, body: UserActionIn) -> dict:
+def cancel_job(request: Request, job_id: int, body: UserActionIn) -> dict:
+    owner_id = request_owner_id(request, body.user_id)
+    assert owner_id is not None
     return _tool_data(
         social_schedule(
             SocialScheduleParams(action="cancel", job_id=job_id),
-            ToolContext(user_id=body.user_id),
+            ToolContext(user_id=owner_id),
         )
     )

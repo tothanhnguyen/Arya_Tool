@@ -18,8 +18,9 @@ Kế hoạch chuyển toàn bộ dữ liệu bền vững sang Supabase:
   retry bền vững và daily summary same-day catch-up đã hoàn thành.
 - 🟡 Phase 6: import CSV và analytics owner-scoped đã hoàn thành; Meta Graph
   adapter thật vẫn khóa.
-- 🟡 Phase S0–S5: schema 18 bảng, database/storage adapter, RLS, artifact
-  metadata và ETL đã sẵn sàng local; Auth session, remote cutover và S7 còn chờ.
+- 🟡 Phase S0–S7 local: schema 18 bảng, database/storage adapter, Auth owner
+  session, RLS, Artifact API, ETL, health/readiness và backup tooling đã sẵn
+  sàng; remote migration/cutover, alert và backup schedule vẫn chờ operator.
 
 ## Nguyên tắc
 

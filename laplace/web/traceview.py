@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -22,8 +23,6 @@ from laplace.web.deps import require_api_key
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-router = APIRouter(include_in_schema=False, dependencies=[Depends(require_api_key)])
 
 RUNNING_STATUSES = {"pending", "running"}
 
@@ -52,6 +51,58 @@ def _duration_s(task: Task) -> float | None:
     if task.created_at and task.finished_at:
         return round((task.finished_at - task.created_at).total_seconds(), 1)
     return None
+
+
+def _request_owner_id(request: Request) -> int | None:
+    owner_id = getattr(request.state, "user_id", None)
+    return owner_id if isinstance(owner_id, int) and owner_id > 0 else None
+
+
+def _origin_tuple(value: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return parsed.scheme, parsed.hostname.casefold(), port
+
+
+def _require_authenticated_trace_mutation(request: Request) -> None:
+    """Require Bearer auth or a same-origin browser POST for destructive HTML actions."""
+
+    if _request_owner_id(request) is None or request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    scheme, separator, credentials = request.headers.get("authorization", "").partition(" ")
+    if separator and scheme.casefold() == "bearer" and credentials.strip():
+        return
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if source is None or _origin_tuple(source) != _origin_tuple(str(request.base_url)):
+        raise HTTPException(
+            status_code=403,
+            detail="Authenticated form mutations require a same-origin request.",
+        )
+
+
+router = APIRouter(
+    include_in_schema=False,
+    dependencies=[
+        Depends(require_api_key),
+        Depends(_require_authenticated_trace_mutation),
+    ],
+)
+
+
+def _task_is_owned(session, task_id: int, owner_id: int | None) -> bool:
+    if owner_id is None:
+        return session.get(Task, task_id) is not None
+    return (
+        session.scalar(
+            select(Task.id).where(Task.id == task_id, Task.user_id == owner_id)
+        )
+        is not None
+    )
 
 
 # ------------------------------------------------------------------ thoi gian
@@ -92,17 +143,23 @@ def _delete_tasks(session, task_ids: list[int]) -> int:
     return int(result.rowcount or 0)
 
 
-def _system_usage(session) -> dict:
+def _system_usage(session, owner_id: int | None = None) -> dict:
     """Tong token + chi phi TOAN he thong: moi dong trong bang llm_calls,
     ke ca call khong gan task (vd: judge) va task da rot khoi trang danh sach."""
-    calls, prompt, completion, cost = session.execute(
+    statement = (
         select(
             func.count(LLMCall.id),
             func.coalesce(func.sum(LLMCall.prompt_tokens), 0),
             func.coalesce(func.sum(LLMCall.completion_tokens), 0),
             func.coalesce(func.sum(LLMCall.cost_usd), 0.0),
         )
-    ).one()
+        .select_from(LLMCall)
+    )
+    if owner_id is not None:
+        statement = statement.join(Task, LLMCall.task_id == Task.id).where(
+            Task.user_id == owner_id
+        )
+    calls, prompt, completion, cost = session.execute(statement).one()
     return {
         "llm_calls": int(calls),
         "prompt_tokens": int(prompt),
@@ -122,9 +179,12 @@ def tasks_list(
     route: str = "",
     limit: int = LIST_LIMIT_DEFAULT,
 ):
+    owner_id = _request_owner_id(request)
     limit = max(LIST_LIMIT_MIN, min(limit, LIST_LIMIT_MAX))
     filtering = bool(q or status or strategy or route)
     stmt = select(Task)
+    if owner_id is not None:
+        stmt = stmt.where(Task.user_id == owner_id)
     if q:
         stmt = stmt.where(Task.request.ilike(f"%{q}%"))
     if status:
@@ -164,7 +224,7 @@ def tasks_list(
                 )
             groups[-1]["tasks"].append(row)
             groups[-1]["cost_usd"] = round(groups[-1]["cost_usd"] + row["cost_usd"], 6)
-        grand = _system_usage(session)
+        grand = _system_usage(session, owner_id)
     return templates.TemplateResponse(
         request,
         "tasks_list.html",
@@ -183,7 +243,7 @@ def tasks_list(
 
 
 @router.post("/tasks/cleanup")
-def cleanup_day(day: str):
+def cleanup_day(request: Request, day: str):
     """Xoa moi task (kem trace) cua MOT ngay dia phuong. day=YYYY-MM-DD."""
     try:
         target = date.fromisoformat(day)
@@ -191,26 +251,35 @@ def cleanup_day(day: str):
         raise HTTPException(status_code=400, detail="day phai co dang YYYY-MM-DD") from e
     start, end = _utc_range_for_local_day(target)
     with session_scope() as session:
+        statement = select(Task.id).where(
+            Task.created_at >= start,
+            Task.created_at < end,
+        )
+        owner_id = _request_owner_id(request)
+        if owner_id is not None:
+            statement = statement.where(Task.user_id == owner_id)
         ids = list(
-            session.scalars(
-                select(Task.id).where(Task.created_at >= start, Task.created_at < end)
-            )
+            session.scalars(statement)
         )
         n = _delete_tasks(session, ids)
     return RedirectResponse(url=f"/?cleaned={n}", status_code=303)
 
 
 @router.post("/tasks/{task_id}/delete")
-def delete_one_task(task_id: int):
+def delete_one_task(request: Request, task_id: int):
     with session_scope() as session:
+        if not _task_is_owned(session, task_id, _request_owner_id(request)):
+            raise HTTPException(status_code=404, detail="Task khong ton tai")
         n = _delete_tasks(session, [task_id])
     if not n:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
     return RedirectResponse(url="/?cleaned=1", status_code=303)
 
 
-def _load_trace_or_404(task_id: int) -> dict:
+def _load_trace_or_404(task_id: int, owner_id: int | None = None) -> dict:
     with session_scope() as session:
+        if not _task_is_owned(session, task_id, owner_id):
+            raise HTTPException(status_code=404, detail="Task khong ton tai")
         trace = task_trace(session, task_id)
     if not trace:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
@@ -288,9 +357,9 @@ def _trace_markdown(trace: dict) -> str:
 
 
 @router.get("/tasks/{task_id}/export.json")
-def export_task_json(task_id: int):
+def export_task_json(request: Request, task_id: int):
     """Tai toan bo trace cua task duoi dang file JSON."""
-    trace = _load_trace_or_404(task_id)
+    trace = _load_trace_or_404(task_id, _request_owner_id(request))
     return JSONResponse(
         content=trace,
         headers={
@@ -300,9 +369,9 @@ def export_task_json(task_id: int):
 
 
 @router.get("/tasks/{task_id}/export.md")
-def export_task_markdown(task_id: int):
+def export_task_markdown(request: Request, task_id: int):
     """Tai trace cua task duoi dang file Markdown gon."""
-    trace = _load_trace_or_404(task_id)
+    trace = _load_trace_or_404(task_id, _request_owner_id(request))
     return PlainTextResponse(
         _trace_markdown(trace),
         media_type="text/markdown; charset=utf-8",
@@ -313,7 +382,11 @@ def export_task_markdown(task_id: int):
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 def task_detail(request: Request, task_id: int):
     with session_scope() as session:
-        trace = task_trace(session, task_id)
+        trace = (
+            task_trace(session, task_id)
+            if _task_is_owned(session, task_id, _request_owner_id(request))
+            else None
+        )
         usage = task_usage(session, task_id) if trace else None
     if not trace:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
@@ -341,7 +414,11 @@ def task_replay(
     query param ?upto=N, auto-play qua meta refresh theo latency that (rut gon).
     """
     with session_scope() as session:
-        data = replay_events(session, task_id)
+        data = (
+            replay_events(session, task_id)
+            if _task_is_owned(session, task_id, _request_owner_id(request))
+            else None
+        )
     if not data:
         raise HTTPException(status_code=404, detail="Task khong ton tai")
 
