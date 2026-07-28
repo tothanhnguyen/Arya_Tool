@@ -4,7 +4,8 @@ The agent may create or approve jobs, but it never performs the side effect
 itself. This worker claims one persisted job, resolves a credential-free
 ``PublishRequest`` and calls a publisher adapter outside the database
 transaction. Stable idempotency keys and per-account locks prevent duplicate
-local execution.
+local execution. A persisted intent fence prevents blind replay when a process
+dies after invoking the publisher but before recording its result.
 """
 
 from __future__ import annotations
@@ -26,6 +27,12 @@ from laplace.social.publishers import (
     SocialPublisher,
 )
 from laplace.social.storage import StorageError, materialize_media
+
+_SIDE_EFFECT_STARTED = "side_effect_started"
+_RECOVERY_SAFE_MESSAGE = "worker interrupted before publish"
+_RECOVERY_UNKNOWN_MESSAGE = (
+    "publish outcome unknown; manual reconciliation required"
+)
 
 
 def utcnow() -> datetime:
@@ -119,6 +126,10 @@ class PublishWorker:
             if account_check.available:
                 try:
                     with materialize_media(media_asset) as media_path:
+                        self._mark_side_effect_started(
+                            job_id,
+                            attempt_id,
+                        )
                         result = self.publisher.publish(
                             replace(request, media_paths=(str(media_path),))
                         )
@@ -142,24 +153,115 @@ class PublishWorker:
     def recover_stale_jobs(
         self, *, stale_before: datetime, retry_at: datetime | None = None
     ) -> int:
-        """Move interrupted running jobs back to retry with the same idempotency key."""
+        """Close stale attempts and retry only work known to predate publishing."""
+        cutoff = _as_utc(stale_before)
         retry_time = _as_utc(retry_at or utcnow())
         with session_scope() as session:
-            result = session.execute(
-                update(PublishJob)
-                .where(
-                    PublishJob.status == "running",
-                    PublishJob.remote_post_id.is_(None),
-                    PublishJob.updated_at < stale_before,
-                )
-                .values(
-                    status="retry",
-                    next_retry_at=retry_time,
-                    last_error="worker interrupted; verify idempotently before retry",
-                    updated_at=retry_time,
+            jobs = list(
+                session.scalars(
+                    select(PublishJob)
+                    .where(
+                        PublishJob.status == "running",
+                        PublishJob.remote_post_id.is_(None),
+                        PublishJob.updated_at < cutoff,
+                    )
+                    .order_by(PublishJob.id)
+                    .with_for_update()
                 )
             )
-            return int(result.rowcount or 0)
+            for job in jobs:
+                attempts = list(
+                    session.scalars(
+                        select(PublishAttempt)
+                        .where(
+                            PublishAttempt.publish_job_id == job.id,
+                            PublishAttempt.status == "running",
+                        )
+                        .order_by(PublishAttempt.attempt_no)
+                        .with_for_update()
+                    )
+                )
+                persisted_max = max(
+                    (attempt.attempt_no for attempt in attempts),
+                    default=job.attempt_count,
+                )
+                job.attempt_count = max(job.attempt_count, persisted_max)
+                outcome_unknown = any(
+                    bool(
+                        dict(attempt.response_json or {}).get(
+                            _SIDE_EFFECT_STARTED
+                        )
+                    )
+                    for attempt in attempts
+                )
+                attempt_status = (
+                    "unknown" if outcome_unknown else "retryable_error"
+                )
+                error_type = (
+                    "publish_outcome_unknown"
+                    if outcome_unknown
+                    else "worker_interrupted"
+                )
+                error_message = (
+                    _RECOVERY_UNKNOWN_MESSAGE
+                    if outcome_unknown
+                    else _RECOVERY_SAFE_MESSAGE
+                )
+                for attempt in attempts:
+                    attempt.status = attempt_status
+                    attempt.finished_at = retry_time
+                    attempt.error_type = error_type
+                    attempt.error_message = error_message
+                    attempt.response_json = {
+                        "success": False,
+                        "error_kind": error_type,
+                        "reconciliation_required": outcome_unknown,
+                        _SIDE_EFFECT_STARTED: outcome_unknown,
+                    }
+
+                if outcome_unknown:
+                    job.status = "failed"
+                    job.next_retry_at = None
+                    job.last_error = (
+                        f"[recovery_required] {_RECOVERY_UNKNOWN_MESSAGE}"
+                    )
+                else:
+                    job.status = "retry"
+                    job.next_retry_at = retry_time
+                    job.last_error = f"[recovery] {_RECOVERY_SAFE_MESSAGE}"
+                job.updated_at = retry_time
+            return len(jobs)
+
+    def _mark_side_effect_started(
+        self,
+        job_id: int,
+        attempt_id: int,
+    ) -> None:
+        """Persist an intent fence before invoking the publisher."""
+        with session_scope() as session:
+            job = session.scalar(
+                select(PublishJob)
+                .where(
+                    PublishJob.id == job_id,
+                    PublishJob.status == "running",
+                )
+                .with_for_update()
+            )
+            attempt = session.scalar(
+                select(PublishAttempt)
+                .where(
+                    PublishAttempt.id == attempt_id,
+                    PublishAttempt.publish_job_id == job_id,
+                    PublishAttempt.status == "running",
+                )
+                .with_for_update()
+            )
+            if job is None or attempt is None:
+                raise RuntimeError("publish attempt is not running")
+            response = dict(attempt.response_json or {})
+            response[_SIDE_EFFECT_STARTED] = True
+            attempt.response_json = response
+            job.updated_at = utcnow()
 
     def _job_account_id(self, job_id: int) -> int | None:
         with session_scope() as session:
@@ -227,11 +329,22 @@ class PublishWorker:
                     retry_at,
                 )
 
-            job.attempt_count += 1
+            persisted_max = session.scalar(
+                select(func.max(PublishAttempt.attempt_no)).where(
+                    PublishAttempt.publish_job_id == job.id
+                )
+            ) or 0
+            attempt_no = max(job.attempt_count, persisted_max) + 1
+            if attempt_no > self.max_attempts:
+                raise PublishPreconditionError(
+                    "maximum publish attempts reached"
+                )
+
+            job.attempt_count = attempt_no
             job.next_retry_at = None
             attempt = PublishAttempt(
                 publish_job_id=job.id,
-                attempt_no=job.attempt_count,
+                attempt_no=attempt_no,
                 status="running",
                 request_json={
                     "account_id": account.external_id,
@@ -321,10 +434,26 @@ class PublishWorker:
         current: datetime,
     ) -> WorkerOutcome:
         with session_scope() as session:
-            job = session.get(PublishJob, job_id)
-            attempt = session.get(PublishAttempt, attempt_id)
-            if job is None or attempt is None:
-                raise RuntimeError("claimed publish state disappeared")
+            job = session.scalar(
+                select(PublishJob)
+                .where(PublishJob.id == job_id)
+                .with_for_update()
+            )
+            attempt = session.scalar(
+                select(PublishAttempt)
+                .where(
+                    PublishAttempt.id == attempt_id,
+                    PublishAttempt.publish_job_id == job_id,
+                )
+                .with_for_update()
+            )
+            if (
+                job is None
+                or attempt is None
+                or job.status != "running"
+                or attempt.status != "running"
+            ):
+                raise RuntimeError("claimed publish state is not running")
 
             attempt.latency_ms = latency_ms
             attempt.finished_at = current

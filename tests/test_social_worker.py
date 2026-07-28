@@ -1,11 +1,20 @@
 """Integration tests for deterministic social publishing."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from laplace.db import session_scope
 from laplace.models import User
-from laplace.social.models import MediaAsset, PublishJob, SocialAccount, SocialPost
+from laplace.social.models import (
+    MediaAsset,
+    PublishAttempt,
+    PublishJob,
+    SocialAccount,
+    SocialPost,
+)
 from laplace.social.publishers import MockPublisher
 from laplace.social.worker import PublishWorker
 
@@ -69,6 +78,66 @@ def _reload_job(job_id: int) -> PublishJob:
         return job
 
 
+def _seed_stale_attempt(
+    job_id: int,
+    *,
+    attempt_no: int = 1,
+    side_effect_started: bool = False,
+    prior_attempt: bool = False,
+) -> tuple[int, datetime]:
+    stale_time = datetime.now(UTC) - timedelta(hours=1)
+    with session_scope() as db:
+        job = db.get(PublishJob, job_id)
+        assert job is not None
+        if prior_attempt:
+            db.add(
+                PublishAttempt(
+                    publish_job_id=job.id,
+                    attempt_no=attempt_no - 1,
+                    status="retryable_error",
+                    error_type="network",
+                    error_message="temporary network error",
+                    started_at=stale_time - timedelta(minutes=5),
+                    finished_at=stale_time - timedelta(minutes=4),
+                )
+            )
+        attempt = PublishAttempt(
+            publish_job_id=job.id,
+            attempt_no=attempt_no,
+            status="running",
+            response_json={"side_effect_started": side_effect_started},
+            error_type="old_error",
+            error_message="sensitive stale detail",
+            started_at=stale_time,
+        )
+        db.add(attempt)
+        job.status = "running"
+        job.attempt_count = max(1, attempt_no - 1)
+        job.last_error = "sensitive stale detail"
+        job.updated_at = stale_time
+        db.flush()
+        return attempt.id, stale_time
+
+
+class SimulatedProcessCrash(RuntimeError):
+    pass
+
+
+class CrashAfterSideEffectPublisher:
+    name = "mock"
+
+    def __init__(self) -> None:
+        self.mock = MockPublisher()
+
+    def check_account(self, account_id):
+        return self.mock.check_account(account_id)
+
+    def publish(self, request):
+        result = self.mock.publish(request)
+        assert result.success
+        raise SimulatedProcessCrash
+
+
 def test_worker_publishes_approved_job_once(session):
     job_id = _seed_job(session)
     session.commit()
@@ -108,6 +177,49 @@ def test_retryable_error_preserves_key_and_then_succeeds(session):
     assert publisher.idempotency_keys == ["c" * 64, "c" * 64]
     assert publisher.side_effect_count == 1
     assert job.attempt_count == 2
+    assert [attempt.status for attempt in job.attempts] == [
+        "retryable_error",
+        "published",
+    ]
+
+
+def test_queued_job_survives_restart_with_new_mock_publisher(session):
+    job_id = _seed_job(session)
+    session.commit()
+    old_publisher = MockPublisher()
+    PublishWorker(old_publisher)
+    new_publisher = MockPublisher()
+
+    outcome = PublishWorker(new_publisher).process_due()
+    job = _reload_job(job_id)
+
+    assert [item.job_id for item in outcome] == [job_id]
+    assert old_publisher.call_count == 0
+    assert new_publisher.side_effect_count == 1
+    assert job.status == "published"
+    assert job.attempt_count == 1
+    assert [attempt.attempt_no for attempt in job.attempts] == [1]
+
+
+def test_retry_job_survives_restart_with_new_mock_publisher(session):
+    job_id = _seed_job(session)
+    session.commit()
+    first_publisher = MockPublisher(["network"])
+    first = PublishWorker(first_publisher).process_job(job_id)
+    retry_job = _reload_job(job_id)
+    second_publisher = MockPublisher()
+
+    second = PublishWorker(second_publisher).process_job(
+        job_id,
+        now=retry_job.next_retry_at,
+    )
+    job = _reload_job(job_id)
+
+    assert first.status == "retry"
+    assert second.status == "published"
+    assert first_publisher.side_effect_count == 0
+    assert second_publisher.side_effect_count == 1
+    assert [attempt.attempt_no for attempt in job.attempts] == [1, 2]
     assert [attempt.status for attempt in job.attempts] == [
         "retryable_error",
         "published",
@@ -280,3 +392,166 @@ def test_stale_running_job_recovers_with_same_idempotency_key(session):
     assert recovered == 1
     assert outcome.status == "published"
     assert publisher.idempotency_keys == [key]
+
+
+def test_stale_running_attempt_is_closed_before_safe_retry(session):
+    job_id = _seed_job(session)
+    session.commit()
+    attempt_id, _stale_time = _seed_stale_attempt(job_id)
+    retry_at = datetime.now(UTC)
+    publisher = MockPublisher()
+    worker = PublishWorker(publisher)
+
+    recovered = worker.recover_stale_jobs(
+        stale_before=retry_at - timedelta(minutes=10),
+        retry_at=retry_at,
+    )
+    recovered_job = _reload_job(job_id)
+    old_attempt = next(
+        attempt for attempt in recovered_job.attempts if attempt.id == attempt_id
+    )
+    outcome = worker.process_job(job_id, now=retry_at)
+    job = _reload_job(job_id)
+
+    assert recovered == 1
+    assert recovered_job.status == "retry"
+    assert old_attempt.status == "retryable_error"
+    assert old_attempt.finished_at is not None
+    assert old_attempt.error_type == "worker_interrupted"
+    assert old_attempt.error_message == "worker interrupted before publish"
+    assert old_attempt.response_json == {
+        "success": False,
+        "error_kind": "worker_interrupted",
+        "reconciliation_required": False,
+        "side_effect_started": False,
+    }
+    assert recovered_job.last_error == (
+        "[recovery] worker interrupted before publish"
+    )
+    assert "sensitive" not in (old_attempt.error_message or "")
+    assert "sensitive" not in (recovered_job.last_error or "")
+    assert outcome.status == "published"
+    assert publisher.side_effect_count == 1
+    assert [attempt.attempt_no for attempt in job.attempts] == [1, 2]
+    assert [attempt.status for attempt in job.attempts] == [
+        "retryable_error",
+        "published",
+    ]
+
+
+def test_recovery_rolls_back_job_and_attempt_together(session, monkeypatch):
+    from laplace.social import worker as worker_module
+
+    job_id = _seed_job(session)
+    session.commit()
+    _seed_stale_attempt(job_id)
+    retry_at = datetime.now(UTC)
+    original_scope = worker_module.session_scope
+
+    @contextmanager
+    def interrupted_transaction():
+        with original_scope() as db:
+            yield db
+            raise SimulatedProcessCrash
+
+    monkeypatch.setattr(worker_module, "session_scope", interrupted_transaction)
+    with pytest.raises(SimulatedProcessCrash):
+        PublishWorker(MockPublisher()).recover_stale_jobs(
+            stale_before=retry_at - timedelta(minutes=10),
+            retry_at=retry_at,
+        )
+    job = _reload_job(job_id)
+
+    assert job.status == "running"
+    assert job.last_error == "sensitive stale detail"
+    assert job.attempts[0].status == "running"
+    assert job.attempts[0].finished_at is None
+    assert job.attempts[0].error_message == "sensitive stale detail"
+
+
+def test_attempt_number_advances_from_persisted_max_after_recovery(session):
+    job_id = _seed_job(session)
+    session.commit()
+    _seed_stale_attempt(
+        job_id,
+        attempt_no=2,
+        prior_attempt=True,
+    )
+    retry_at = datetime.now(UTC)
+    worker = PublishWorker(MockPublisher(), max_attempts=5)
+
+    recovered = worker.recover_stale_jobs(
+        stale_before=retry_at - timedelta(minutes=10),
+        retry_at=retry_at,
+    )
+    outcome = worker.process_job(job_id, now=retry_at)
+    job = _reload_job(job_id)
+
+    assert recovered == 1
+    assert outcome.status == "published"
+    assert job.attempt_count == 3
+    assert [attempt.attempt_no for attempt in job.attempts] == [1, 2, 3]
+    assert len({attempt.attempt_no for attempt in job.attempts}) == 3
+
+
+def test_crash_after_mock_side_effect_persists_unknown_outcome_fence(session):
+    job_id = _seed_job(session)
+    session.commit()
+    publisher = CrashAfterSideEffectPublisher()
+    crash_time = datetime.now(UTC)
+
+    with pytest.raises(SimulatedProcessCrash):
+        PublishWorker(publisher).process_job(job_id, now=crash_time)
+    job = _reload_job(job_id)
+
+    assert publisher.mock.side_effect_count == 1
+    assert job.status == "running"
+    assert job.attempt_count == 1
+    assert len(job.attempts) == 1
+    assert job.attempts[0].status == "running"
+    assert job.attempts[0].response_json == {"side_effect_started": True}
+
+
+def test_new_mock_publisher_fails_closed_for_unknown_old_side_effect(session):
+    job_id = _seed_job(session)
+    session.commit()
+    crashed_publisher = CrashAfterSideEffectPublisher()
+    crash_time = datetime.now(UTC)
+    with pytest.raises(SimulatedProcessCrash):
+        PublishWorker(crashed_publisher).process_job(job_id, now=crash_time)
+
+    restarted_publisher = MockPublisher()
+    restarted_worker = PublishWorker(restarted_publisher)
+    recovered = restarted_worker.recover_stale_jobs(
+        stale_before=crash_time + timedelta(seconds=1),
+        retry_at=crash_time + timedelta(minutes=1),
+    )
+    outcome = restarted_worker.process_job(
+        job_id,
+        now=crash_time + timedelta(minutes=1),
+    )
+    job = _reload_job(job_id)
+
+    assert recovered == 1
+    assert crashed_publisher.mock.side_effect_count == 1
+    assert restarted_publisher.call_count == 0
+    assert restarted_publisher.side_effect_count == 0
+    assert not outcome.processed
+    assert outcome.status == "failed"
+    assert job.status == "failed"
+    assert job.next_retry_at is None
+    assert job.last_error == (
+        "[recovery_required] publish outcome unknown; manual reconciliation required"
+    )
+    assert job.attempts[0].status == "unknown"
+    assert job.attempts[0].finished_at is not None
+    assert job.attempts[0].error_type == "publish_outcome_unknown"
+    assert job.attempts[0].error_message == (
+        "publish outcome unknown; manual reconciliation required"
+    )
+    assert job.attempts[0].response_json == {
+        "success": False,
+        "error_kind": "publish_outcome_unknown",
+        "reconciliation_required": True,
+        "side_effect_started": True,
+    }
