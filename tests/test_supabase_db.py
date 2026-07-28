@@ -145,7 +145,13 @@ EXPECTED_EXPLICIT_INDEXES = {
 
 
 def _normalized_sql(value: str) -> str:
-    return " ".join(value.lower().split())
+    normalized = " ".join(value.lower().split())
+    # pg_policies deparses varchar comparisons with casts around identifiers.
+    return re.sub(
+        r"\(([a-z_][a-z0-9_.]*)\)::(?:text|character varying|varchar)",
+        r"\1",
+        normalized,
+    )
 
 
 def _has_obvious_policy_bypass(expression: str) -> bool:
@@ -359,6 +365,12 @@ def test_obvious_policy_bypass_detection():
     assert not _has_obvious_policy_bypass(
         "user_id = public.current_app_user_id()"
     )
+
+
+def test_normalized_sql_removes_postgres_identifier_text_casts():
+    assert _normalized_sql(
+        "((storage_backend)::text = 'supabase'::text)"
+    ) == "(storage_backend = 'supabase'::text)"
 
 
 def test_postgres_urls_use_psycopg_driver():
@@ -1236,10 +1248,22 @@ def _assert_postgres_security_metadata(connection) -> None:
         policy = public_policies[key]
         for clause_name, required_tokens in clause_tokens.items():
             expression = policy[clause_name]
-            if expression is None or any(
-                token not in expression for token in required_tokens
-            ):
-                pytest.fail("A critical public policy has unsafe SQL semantics")
+            missing_tokens = (
+                list(required_tokens)
+                if expression is None
+                else [
+                    token
+                    for token in required_tokens
+                    if token not in expression
+                ]
+            )
+            if missing_tokens:
+                table_name, policy_name = key
+                pytest.fail(
+                    "A critical public policy has unsafe SQL semantics: "
+                    f"{table_name}.{policy_name} {clause_name} is missing "
+                    f"{missing_tokens}"
+                )
 
     expected_storage_clauses = {
         "arya_private_objects_select": ("using",),
