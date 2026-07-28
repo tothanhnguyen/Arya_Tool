@@ -52,7 +52,9 @@ docker compose up --build
 
 - Cần Docker Compose ≥ 2.24 (dùng cú pháp `env_file: required: false`).
 - SQLite được giữ trong `./data/`, báo cáo markdown trong `./reports/` (volume mount).
-- Container có healthcheck gọi `/openapi.json` (endpoint này không bị `LAPLACE_API_KEY` chặn) — `docker compose ps` hiện `healthy` sau ~20 giây.
+- Container có healthcheck liveness gọi `/health/live`; `docker compose ps`
+  hiện `healthy` chỉ xác nhận web process còn sống. Phải kiểm tra riêng
+  `/health/ready` trước khi mở traffic.
 
 ## 4. Dùng qua Telegram
 

@@ -284,6 +284,9 @@ docker compose up --build
 - SQLite nằm trong volume `./data/` (`/app/data/arya-tool.db` trong container), báo cáo markdown trong `./reports/` — dữ liệu giữ nguyên qua các lần restart.
 - Container có **healthcheck** liveness tại `/health/live`; readiness DB,
   Storage và scheduler ở `/health/ready`.
+- Preflight vận hành không in secret: chạy
+  `docker compose run --rm --no-deps arya_tool python -m laplace.ops.preflight config`
+  trước khi start và `python -m laplace.ops.preflight runtime` sau khi start.
 - Trace viewer: http://localhost:8010/ như khi chạy local.
 
 Runbook health, SQLite backup và kế hoạch backup Supabase:

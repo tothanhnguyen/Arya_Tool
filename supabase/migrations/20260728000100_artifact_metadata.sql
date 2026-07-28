@@ -22,8 +22,21 @@ create table public.artifacts (
         check (sha256 ~ '^[0-9a-f]{64}$'),
     constraint ck_artifact_status
         check (status in ('active', 'deleting', 'delete_failed', 'deleted')),
+    constraint ck_artifact_safe_name
+        check (
+            char_length(original_name) between 1 and 120
+            and original_name ~ '^[a-z0-9][a-z0-9._-]*$'
+            and right(original_name, 1) ~ '^[a-z0-9]$'
+        ),
     constraint ck_artifact_owner_key
-        check (storage_key like 'users/' || user_id::text || '/%')
+        check (
+            storage_bucket = 'arya-artifacts'
+            and storage_key !~ '(^|/)[.]{1,2}(/|$)'
+            and storage_key = (
+                'users/' || user_id::text || '/' || left(sha256, 2)
+                || '/' || sha256 || '-' || original_name
+            )
+        )
 );
 
 create index ix_artifacts_user_id on public.artifacts(user_id);
@@ -34,15 +47,36 @@ create index ix_artifacts_user_kind
 
 alter table public.artifacts enable row level security;
 
+revoke all on public.artifacts from anon;
+revoke all on sequence public.artifacts_id_seq from anon;
 grant select, insert, update, delete on public.artifacts to authenticated;
 grant usage, select on sequence public.artifacts_id_seq to authenticated;
 
 create policy artifacts_owner_all on public.artifacts
 for all to authenticated
-using (user_id = public.current_app_user_id())
+using (
+    user_id = public.current_app_user_id()
+    and storage_bucket = 'arya-artifacts'
+    and sha256 ~ '^[0-9a-f]{64}$'
+    and char_length(original_name) between 1 and 120
+    and original_name ~ '^[a-z0-9][a-z0-9._-]*$'
+    and right(original_name, 1) ~ '^[a-z0-9]$'
+    and storage_key !~ '(^|/)[.]{1,2}(/|$)'
+    and storage_key = (
+        'users/' || public.current_app_user_id()::text || '/'
+        || left(sha256, 2) || '/' || sha256 || '-' || original_name
+    )
+)
 with check (
     user_id = public.current_app_user_id()
     and storage_bucket = 'arya-artifacts'
-    and (storage.foldername(storage_key))[1] = 'users'
-    and (storage.foldername(storage_key))[2] = public.current_app_user_id()::text
+    and sha256 ~ '^[0-9a-f]{64}$'
+    and char_length(original_name) between 1 and 120
+    and original_name ~ '^[a-z0-9][a-z0-9._-]*$'
+    and right(original_name, 1) ~ '^[a-z0-9]$'
+    and storage_key !~ '(^|/)[.]{1,2}(/|$)'
+    and storage_key = (
+        'users/' || public.current_app_user_id()::text || '/'
+        || left(sha256, 2) || '/' || sha256 || '-' || original_name
+    )
 );
