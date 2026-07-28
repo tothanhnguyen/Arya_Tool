@@ -3,7 +3,9 @@
 import json
 
 import httpx
+import pytest
 
+from laplace.ops import preflight as preflight_module
 from laplace.ops.preflight import (
     CheckState,
     config_preflight,
@@ -259,6 +261,33 @@ def test_runtime_preflight_sanitizes_unexpected_transport_errors():
     assert not report.ready
     assert all(check.state is CheckState.UNAVAILABLE for check in report.checks)
     assert secret not in serialized
+
+
+@pytest.mark.parametrize(
+    "timeout_s",
+    (0, -1, 121, float("nan"), float("inf")),
+)
+def test_runtime_preflight_rejects_invalid_timeout(timeout_s):
+    with pytest.raises(ValueError):
+        runtime_preflight(timeout_s=timeout_s)
+
+
+def test_runtime_cli_forwards_configurable_timeout(monkeypatch, capsys):
+    captured = {}
+
+    def fake_runtime_preflight(*, port, timeout_s):
+        captured.update(port=port, timeout_s=timeout_s)
+        return config_preflight(_valid_environment())
+
+    monkeypatch.setattr(
+        preflight_module,
+        "runtime_preflight",
+        fake_runtime_preflight,
+    )
+
+    assert main(["runtime", "--port", "8123", "--timeout", "45"]) == 0
+    assert captured == {"port": 8123, "timeout_s": 45.0}
+    assert json.loads(capsys.readouterr().out)["status"] == "ready"
 
 
 def test_config_cli_returns_sanitized_failure_for_invalid_database(

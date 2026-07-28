@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 _SECURE_SSL_MODES = frozenset({"require", "verify-ca", "verify-full"})
 _EXPECTED_BUCKETS = ("arya-media", "arya-artifacts")
+_DEFAULT_RUNTIME_TIMEOUT_SECONDS = 30.0
+_MAX_RUNTIME_TIMEOUT_SECONDS = 120.0
 
 
 class CheckState(StrEnum):
@@ -334,12 +337,19 @@ def _runtime_check_state(
 def runtime_preflight(
     *,
     port: int = 8010,
+    timeout_s: float = _DEFAULT_RUNTIME_TIMEOUT_SECONDS,
     transport: httpx.BaseTransport | None = None,
 ) -> PreflightReport:
     """Probe only the loopback app and discard all untrusted response details."""
 
     if not 1 <= port <= 65_535:
         raise ValueError("port must be between 1 and 65535")
+    if (
+        not math.isfinite(timeout_s)
+        or timeout_s <= 0
+        or timeout_s > _MAX_RUNTIME_TIMEOUT_SECONDS
+    ):
+        raise ValueError("timeout must be between 0 and 120 seconds")
     live_state = CheckState.UNAVAILABLE
     readiness_state = CheckState.UNAVAILABLE
     component_states = {
@@ -350,7 +360,7 @@ def runtime_preflight(
     try:
         with httpx.Client(
             base_url=f"http://127.0.0.1:{port}",
-            timeout=5.0,
+            timeout=timeout_s,
             follow_redirects=False,
             trust_env=False,
             transport=transport,
@@ -408,6 +418,13 @@ def _parser() -> argparse.ArgumentParser:
         help="probe liveness/readiness through loopback only",
     )
     runtime_parser.add_argument("--port", type=int, default=8010)
+    runtime_parser.add_argument(
+        "--timeout",
+        dest="timeout_s",
+        type=float,
+        default=_DEFAULT_RUNTIME_TIMEOUT_SECONDS,
+        help="per-request timeout in seconds (default: 30, maximum: 120)",
+    )
     return parser
 
 
@@ -417,7 +434,10 @@ def main(argv: list[str] | None = None) -> int:
         report = (
             config_preflight(os.environ)
             if args.action == "config"
-            else runtime_preflight(port=args.port)
+            else runtime_preflight(
+                port=args.port,
+                timeout_s=args.timeout_s,
+            )
         )
     except ValueError:
         print(

@@ -92,6 +92,9 @@ readiness handler intentionally checks its configured database and Storage, so
 this runtime step does cause the running app to contact those dependencies. It
 reports sanitized states for liveness, aggregate readiness, database/schema,
 Storage, and scheduler and exits with status 2 unless every gate is ready.
+The default per-request timeout is 30 seconds so sequential database and
+Storage probes can finish during a cold start. Use `--timeout` to raise or
+lower it within 120 seconds when the environment requires a different bound.
 
 ## Startup and restart
 
