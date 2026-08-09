@@ -844,6 +844,8 @@ def test_analytics_requires_seeded_totals_currency_and_event_identity():
 
 def test_manifest_fails_for_each_missing_inventory_class_and_cardinality():
     for missing_class in qa.InventoryClass:
+        if qa.MANDATORY_INVENTORY_COUNTS[missing_class] == 0:
+            continue
         ledger = qa.FixtureLedger()
         factory = _TargetFactory()
         reduced = dict(qa.MANDATORY_INVENTORY_COUNTS)

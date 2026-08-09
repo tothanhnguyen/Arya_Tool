@@ -715,6 +715,7 @@ class CleanupResource(StrEnum):
     AFFILIATE_EVENT = "affiliate_event"
     PUBLISH_ATTEMPT = "publish_attempt"
     PUBLISH_JOB = "publish_job"
+    CONTENT_GENERATION = "content_generation"
     SOCIAL_POST = "social_post"
     AFFILIATE_PRODUCT = "affiliate_product"
     SOCIAL_ACCOUNT = "social_account"
@@ -745,6 +746,7 @@ class InventoryClass(StrEnum):
     PUBLISH_ATTEMPT_QUEUED = "publish_attempt_queued"
     PUBLISH_ATTEMPT_RETRY = "publish_attempt_retry"
     PUBLISH_ATTEMPT_FENCED = "publish_attempt_fenced"
+    CONTENT_GENERATION_UNEXPECTED = "content_generation_unexpected"
 
 
 MANDATORY_INVENTORY_COUNTS = {
@@ -766,6 +768,7 @@ MANDATORY_INVENTORY_COUNTS = {
     InventoryClass.PUBLISH_ATTEMPT_QUEUED: 1,
     InventoryClass.PUBLISH_ATTEMPT_RETRY: 3,
     InventoryClass.PUBLISH_ATTEMPT_FENCED: 1,
+    InventoryClass.CONTENT_GENERATION_UNEXPECTED: 0,
 }
 INITIAL_INVENTORY_COUNTS = {
     InventoryClass.AUTH_USER: 2,
@@ -780,6 +783,7 @@ INITIAL_INVENTORY_COUNTS = {
     InventoryClass.AFFILIATE_EVENT: 3,
     InventoryClass.PUBLISH_JOB_HAPPY: 1,
     InventoryClass.PUBLISH_ATTEMPT_HAPPY: 1,
+    InventoryClass.CONTENT_GENERATION_UNEXPECTED: 0,
 }
 _INVENTORY_RESOURCE = {
     InventoryClass.AUTH_USER: CleanupResource.AUTH_USER,
@@ -800,6 +804,7 @@ _INVENTORY_RESOURCE = {
     InventoryClass.PUBLISH_ATTEMPT_QUEUED: CleanupResource.PUBLISH_ATTEMPT,
     InventoryClass.PUBLISH_ATTEMPT_RETRY: CleanupResource.PUBLISH_ATTEMPT,
     InventoryClass.PUBLISH_ATTEMPT_FENCED: CleanupResource.PUBLISH_ATTEMPT,
+    InventoryClass.CONTENT_GENERATION_UNEXPECTED: CleanupResource.CONTENT_GENERATION,
 }
 _CLEANUP_ORDER = {
     resource: index
@@ -808,6 +813,7 @@ _CLEANUP_ORDER = {
             CleanupResource.AFFILIATE_EVENT,
             CleanupResource.PUBLISH_ATTEMPT,
             CleanupResource.PUBLISH_JOB,
+            CleanupResource.CONTENT_GENERATION,
             CleanupResource.SOCIAL_POST,
             CleanupResource.AFFILIATE_PRODUCT,
             CleanupResource.SOCIAL_ACCOUNT,
@@ -892,6 +898,7 @@ class ExactCleanupTarget:
             CleanupResource.AFFILIATE_EVENT: "affiliate_events",
             CleanupResource.PUBLISH_ATTEMPT: "publish_attempts",
             CleanupResource.PUBLISH_JOB: "publish_jobs",
+            CleanupResource.CONTENT_GENERATION: "content_generations",
             CleanupResource.SOCIAL_POST: "social_posts",
             CleanupResource.AFFILIATE_PRODUCT: "affiliate_products",
             CleanupResource.SOCIAL_ACCOUNT: "social_accounts",
